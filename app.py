@@ -1,0 +1,1368 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail, Message
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from datetime import datetime, timedelta
+from functools import wraps
+import jwt
+import qrcode
+import io
+import base64
+import os
+import secrets
+import pymysql
+pymysql.install_as_MySQLdb()
+from sqlalchemy import Numeric
+
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = secrets.token_hex(32)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:@localhost/epicuremart'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+
+# Flask-Mail Configuration
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = 'reynaldo.yasona06@gmail.com'
+app.config['MAIL_PASSWORD'] = 'urantilhbyppxpqe'
+app.config['MAIL_DEFAULT_SENDER'] = 'Epicuremart <noreply@epicuremart.com>'
+
+db = SQLAlchemy(app)
+mail = Mail(app)
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+# ==================== MODELS ====================
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.Enum('admin', 'seller', 'customer', 'courier', 'rider'), nullable=False)
+    is_verified = db.Column(db.Boolean, default=False)
+    is_approved = db.Column(db.Boolean, default=True)  # Admin approval for sellers/couriers/riders
+    full_name = db.Column(db.String(100))
+    phone = db.Column(db.String(20))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    shop = db.relationship('Shop', backref='owner', uselist=False, cascade='all, delete-orphan')
+    addresses = db.relationship('Address', backref='user', cascade='all, delete-orphan')
+    orders = db.relationship('Order', backref='customer', foreign_keys='Order.customer_id')
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+    
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+
+class Shop(db.Model):
+    __tablename__ = 'shops'
+    id = db.Column(db.Integer, primary_key=True)
+    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    logo = db.Column(db.String(255))
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    products = db.relationship('Product', backref='shop', cascade='all, delete-orphan')
+
+
+class Category(db.Model):
+    __tablename__ = 'categories'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    icon = db.Column(db.String(50))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    products = db.relationship('Product', backref='category')
+
+
+
+
+class Product(db.Model):
+    __tablename__ = 'products'
+    id = db.Column(db.Integer, primary_key=True)
+    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    price = db.Column(Numeric(10, 2), nullable=False)  # ✅ FIXED
+    stock = db.Column(db.Integer, default=0)
+    image = db.Column(db.String(255))
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+
+class Address(db.Model):
+    __tablename__ = 'addresses'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    label = db.Column(db.String(50))  # Home, Work, etc.
+    full_address = db.Column(db.Text, nullable=False)
+    city = db.Column(db.String(100))
+    postal_code = db.Column(db.String(20))
+    is_default = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Order(db.Model):
+    __tablename__ = 'orders'
+    id = db.Column(db.Integer, primary_key=True)
+    order_number = db.Column(db.String(50), unique=True, nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False)
+    courier_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    rider_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    
+    status = db.Column(db.Enum(
+        'PENDING_PAYMENT', 'READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER',
+        'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'
+    ), default='PENDING_PAYMENT')
+    
+    delivery_address_id = db.Column(db.Integer, db.ForeignKey('addresses.id'))
+    total_amount = db.Column(Numeric(10, 2), nullable=False)
+    commission_rate = db.Column(Numeric(5, 2), default=5.00)  # 5% commission
+    commission_amount = db.Column(Numeric(10, 2), default=0.00)
+    seller_amount = db.Column(Numeric(10, 2), default=0.00)
+
+    # QR Tokens
+    pickup_token = db.Column(db.String(500))  # JWT for courier pickup
+    delivery_token = db.Column(db.String(500))  # JWT for customer delivery
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    items = db.relationship('OrderItem', backref='order', cascade='all, delete-orphan')
+    delivery_address = db.relationship('Address', foreign_keys=[delivery_address_id])
+    shop = db.relationship('Shop', foreign_keys=[shop_id])
+    courier = db.relationship('User', foreign_keys=[courier_id])
+    rider = db.relationship('User', foreign_keys=[rider_id])
+
+
+class OrderItem(db.Model):
+    __tablename__ = 'order_items'
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    price = db.Column(Numeric(10, 2), nullable=False)
+    
+    product = db.relationship('Product')
+
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    action = db.Column(db.String(100), nullable=False)
+    entity_type = db.Column(db.String(50))
+    entity_id = db.Column(db.Integer)
+    details = db.Column(db.Text)
+    ip_address = db.Column(db.String(45))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User')
+
+
+# ==================== HELPER FUNCTIONS ====================
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def role_required(*roles):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'user_id' not in session:
+                flash('Please log in to access this page.', 'warning')
+                return redirect(url_for('login'))
+            
+            user = User.query.get(session['user_id'])
+            if user.role not in roles:
+                flash('You do not have permission to access this page.', 'danger')
+                return redirect(url_for('index'))
+            
+            if not user.is_approved and user.role in ['seller', 'courier', 'rider']:
+                flash('Your account is pending approval.', 'warning')
+                return redirect(url_for('pending_approval'))
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+def log_action(action, entity_type=None, entity_id=None, details=None):
+    """Create audit log entry"""
+    try:
+        log = AuditLog(
+            user_id=session.get('user_id'),
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details,
+            ip_address=request.remote_addr
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        print(f"Logging error: {e}")
+
+
+def send_email(to, subject, body):
+    """Send email notification"""
+    try:
+        msg = Message(subject, recipients=[to])
+        msg.body = body
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f"Email error: {e}")
+        return False
+
+
+def generate_qr_token(order_id, token_type, expiry_hours=24):
+    """Generate JWT token for QR code"""
+    payload = {
+        'order_id': order_id,
+        'type': token_type,  # 'pickup' or 'delivery'
+        'exp': datetime.utcnow() + timedelta(hours=expiry_hours)
+    }
+    return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+
+
+def verify_qr_token(token):
+    """Verify and decode JWT token from QR"""
+    try:
+        payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+
+def generate_qr_code(data):
+    """Generate QR code image as base64"""
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def generate_order_number():
+    """Generate unique order number"""
+    import random
+    timestamp = datetime.now().strftime('%Y%m%d')
+    random_part = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+    return f"EM{timestamp}{random_part}"
+
+
+# ==================== ROUTES ====================
+
+@app.route('/')
+def index():
+    categories = Category.query.all()
+    products = Product.query.filter_by(is_active=True).limit(12).all()
+    return render_template('index.html', categories=categories, products=products)
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        role = request.form.get('role', 'customer')
+        full_name = request.form.get('full_name')
+        phone = request.form.get('phone')
+        
+        if User.query.filter_by(email=email).first():
+            flash('Email already registered.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Sellers, couriers, riders need admin approval
+        is_approved = True if role == 'customer' else False
+        
+        user = User(
+            email=email,
+            role=role,
+            full_name=full_name,
+            phone=phone,
+            is_approved=is_approved
+        )
+        user.set_password(password)
+        
+        db.session.add(user)
+        db.session.commit()
+        
+        # Send verification email
+        verification_token = generate_qr_token(user.id, 'email_verify', expiry_hours=48)
+        verify_url = url_for('verify_email', token=verification_token, _external=True)
+        send_email(
+            user.email,
+            'Verify your Epicuremart account',
+            f'Click here to verify: {verify_url}'
+        )
+        
+        log_action('USER_REGISTERED', 'User', user.id, f'New {role} registered')
+        
+        flash('Registration successful! Please check your email to verify your account.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html')
+
+
+@app.route('/verify-email/<token>')
+def verify_email(token):
+    payload = verify_qr_token(token)
+    if not payload or payload.get('type') != 'email_verify':
+        flash('Invalid or expired verification link.', 'danger')
+        return redirect(url_for('login'))
+    
+    user = User.query.get(payload['order_id'])  # Reusing order_id field for user_id
+    if user:
+        user.is_verified = True
+        db.session.commit()
+        log_action('EMAIL_VERIFIED', 'User', user.id)
+        flash('Email verified successfully! You can now log in.', 'success')
+    
+    return redirect(url_for('login'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if user and user.check_password(password):
+            if not user.is_verified:
+                flash('Please verify your email before logging in.', 'warning')
+                return redirect(url_for('login'))
+            
+            session['user_id'] = user.id
+            session['role'] = user.role
+            
+            log_action('USER_LOGIN', 'User', user.id)
+            
+            # Redirect based on role
+            if user.role == 'admin':
+                return redirect(url_for('admin_dashboard'))
+            elif user.role == 'seller':
+                if not user.is_approved:
+                    return redirect(url_for('pending_approval'))
+                return redirect(url_for('seller_dashboard'))
+            elif user.role == 'courier':
+                if not user.is_approved:
+                    return redirect(url_for('pending_approval'))
+                return redirect(url_for('courier_dashboard'))
+            elif user.role == 'rider':
+                if not user.is_approved:
+                    return redirect(url_for('pending_approval'))
+                return redirect(url_for('rider_dashboard'))
+            else:
+                return redirect(url_for('index'))
+        else:
+            flash('Invalid email or password.', 'danger')
+    
+    return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    log_action('USER_LOGOUT', 'User', session.get('user_id'))
+    session.clear()
+    flash('Logged out successfully.', 'info')
+    return redirect(url_for('index'))
+
+
+@app.route('/pending-approval')
+@login_required
+def pending_approval():
+    return render_template('pending_approval.html')
+
+
+# ==================== CUSTOMER ROUTES ====================
+
+@app.route('/browse')
+def browse():
+    category_id = request.args.get('category')
+    search = request.args.get('search', '')
+    
+    query = Product.query.filter_by(is_active=True)
+    
+    if category_id:
+        query = query.filter_by(category_id=category_id)
+    
+    if search:
+        query = query.filter(Product.name.like(f'%{search}%'))
+    
+    products = query.all()
+    categories = Category.query.all()
+    
+    return render_template('browse.html', products=products, categories=categories)
+
+
+@app.route('/cart')
+@login_required
+def view_cart():
+    cart = session.get('cart', {})
+    cart_items = []
+    total = 0
+    
+    for product_id, quantity in cart.items():
+        product = Product.query.get(int(product_id))
+        if product:
+            subtotal = float(product.price) * quantity
+            cart_items.append({
+                'product': product,
+                'quantity': quantity,
+                'subtotal': subtotal
+            })
+            total += subtotal
+    
+    return render_template('cart.html', cart_items=cart_items, total=total)
+
+
+@app.route('/cart/add/<int:product_id>', methods=['POST'])
+@login_required
+def add_to_cart(product_id):
+    product = Product.query.get_or_404(product_id)
+    quantity = int(request.form.get('quantity', 1))
+    
+    cart = session.get('cart', {})
+    
+    if str(product_id) in cart:
+        cart[str(product_id)] += quantity
+    else:
+        cart[str(product_id)] = quantity
+    
+    session['cart'] = cart
+    flash(f'{product.name} added to cart!', 'success')
+    return redirect(url_for('browse'))
+
+
+@app.route('/cart/remove/<int:product_id>')
+@login_required
+def remove_from_cart(product_id):
+    cart = session.get('cart', {})
+    if str(product_id) in cart:
+        del cart[str(product_id)]
+        session['cart'] = cart
+        flash('Item removed from cart.', 'info')
+    return redirect(url_for('view_cart'))
+
+@app.route('/customer/address/add', methods=['POST'])
+@login_required
+@role_required('customer')
+def add_address():
+    label = request.form.get('label')
+    full_address = request.form.get('full_address')
+    city = request.form.get('city')
+    postal_code = request.form.get('postal_code')
+    is_default = request.form.get('is_default') == '1'
+    redirect_to = request.form.get('redirect_to', 'checkout')
+    
+    # If this is set as default, unset other defaults
+    if is_default:
+        Address.query.filter_by(user_id=session['user_id'], is_default=True).update({'is_default': False})
+    
+    # If this is the first address, make it default
+    if Address.query.filter_by(user_id=session['user_id']).count() == 0:
+        is_default = True
+    
+    address = Address(
+        user_id=session['user_id'],
+        label=label,
+        full_address=full_address,
+        city=city,
+        postal_code=postal_code,
+        is_default=is_default
+    )
+    
+    db.session.add(address)
+    db.session.commit()
+    
+    log_action('ADDRESS_ADDED', 'Address', address.id, f'Added {label} address')
+    flash('Delivery address added successfully!', 'success')
+    
+    if redirect_to == 'profile':
+        return redirect(url_for('customer_profile'))
+    return redirect(url_for('checkout'))
+
+
+@app.route('/customer/profile')
+@login_required
+@role_required('customer')
+def customer_profile():
+    user = User.query.get(session['user_id'])
+    addresses = Address.query.filter_by(user_id=session['user_id']).all()
+    return render_template('customer_profile.html', current_user=user, addresses=addresses)
+
+
+@app.route('/customer/address/<int:address_id>/set-default', methods=['POST'])
+@login_required
+@role_required('customer')
+def set_default_address(address_id):
+    # Unset all defaults
+    Address.query.filter_by(user_id=session['user_id']).update({'is_default': False})
+    
+    # Set new default
+    address = Address.query.get_or_404(address_id)
+    if address.user_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('customer_profile'))
+    
+    address.is_default = True
+    db.session.commit()
+    
+    log_action('ADDRESS_SET_DEFAULT', 'Address', address.id)
+    flash(f'{address.label} address set as default.', 'success')
+    return redirect(url_for('customer_profile'))
+
+
+@app.route('/customer/address/<int:address_id>/delete', methods=['POST'])
+@login_required
+@role_required('customer')
+def delete_address(address_id):
+    address = Address.query.get_or_404(address_id)
+    
+    if address.user_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('customer_profile'))
+    
+    was_default = address.is_default
+    label = address.label
+    
+    db.session.delete(address)
+    
+    # If deleted address was default, set another as default
+    if was_default:
+        new_default = Address.query.filter_by(user_id=session['user_id']).first()
+        if new_default:
+            new_default.is_default = True
+    
+    db.session.commit()
+    
+    log_action('ADDRESS_DELETED', 'Address', address_id, f'Deleted {label} address')
+    flash('Address deleted successfully.', 'success')
+    return redirect(url_for('customer_profile'))
+
+@app.route('/checkout', methods=['GET', 'POST'])
+@login_required
+@role_required('customer')
+def checkout():
+    cart = session.get('cart', {})
+    if not cart:
+        flash('Your cart is empty.', 'warning')
+        return redirect(url_for('browse'))
+    
+    addresses = Address.query.filter_by(user_id=session['user_id']).all()
+    
+    if request.method == 'POST':
+        address_id = request.form.get('address_id')
+        
+        # Group items by shop
+        shop_orders = {}
+        for product_id, quantity in cart.items():
+            product = Product.query.get(int(product_id))
+            if product:
+                if product.shop_id not in shop_orders:
+                    shop_orders[product.shop_id] = []
+                shop_orders[product.shop_id].append((product, quantity))
+        
+        # Create order for each shop
+        for shop_id, items in shop_orders.items():
+            total = sum([float(p.price) * q for p, q in items])
+            
+            order = Order(
+                order_number=generate_order_number(),
+                customer_id=session['user_id'],
+                shop_id=shop_id,
+                delivery_address_id=address_id,
+                total_amount=total,
+                status='PENDING_PAYMENT'
+            )
+            db.session.add(order)
+            db.session.flush()
+            
+            for product, quantity in items:
+                order_item = OrderItem(
+                    order_id=order.id,
+                    product_id=product.id,
+                    quantity=quantity,
+                    price=product.price
+                )
+                db.session.add(order_item)
+            
+            log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
+        
+        db.session.commit()
+        session['cart'] = {}
+        
+        # Send confirmation email
+        user = User.query.get(session['user_id'])
+        send_email(
+            user.email,
+            'Order Confirmation',
+            f'Your orders have been placed successfully!'
+        )
+        
+        flash('Order(s) placed successfully!', 'success')
+        return redirect(url_for('customer_orders'))
+    
+    return render_template('checkout.html', addresses=addresses)
+
+
+@app.route('/customer/orders')
+@login_required
+@role_required('customer')
+def customer_orders():
+    orders = Order.query.filter_by(customer_id=session['user_id']).order_by(Order.created_at.desc()).all()
+    return render_template('customer_orders.html', orders=orders)
+
+
+@app.route('/customer/order/<int:order_id>')
+@login_required
+@role_required('customer')
+def customer_order_detail(order_id):
+    order = Order.query.get_or_404(order_id)
+    
+    if order.customer_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('customer_orders'))
+    
+    # Generate QR code for delivery confirmation
+    qr_data = None
+    if order.delivery_token:
+        qr_data = generate_qr_code(order.delivery_token)
+    
+    return render_template('customer_order_detail.html', order=order, qr_data=qr_data)
+
+
+"""
+Epicuremart - Part 2: Seller, Courier, Rider, and Admin Routes
+Add this to the main Flask application after the customer routes
+"""
+
+# ==================== SELLER ROUTES ====================
+
+@app.route('/seller/dashboard')
+@login_required
+@role_required('seller')
+def seller_dashboard():
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        return redirect(url_for('create_shop'))
+    
+    # Statistics
+    total_products = Product.query.filter_by(shop_id=user.shop.id).count()
+    total_orders = Order.query.filter_by(shop_id=user.shop.id).count()
+    pending_orders = Order.query.filter_by(
+        shop_id=user.shop.id, 
+        status='PENDING_PAYMENT'
+    ).count()
+    ready_orders = Order.query.filter_by(
+        shop_id=user.shop.id, 
+        status='READY_FOR_PICKUP'
+    ).count()
+    
+    recent_orders = Order.query.filter_by(shop_id=user.shop.id)\
+        .order_by(Order.created_at.desc()).limit(5).all()
+    
+    return render_template('seller_dashboard.html',
+        shop=user.shop,
+        total_products=total_products,
+        total_orders=total_orders,
+        pending_orders=pending_orders,
+        ready_orders=ready_orders,
+        recent_orders=recent_orders
+    )
+
+
+@app.route('/seller/shop/create', methods=['GET', 'POST'])
+@login_required
+@role_required('seller')
+def create_shop():
+    user = User.query.get(session['user_id'])
+    
+    if user.shop:
+        flash('You already have a shop.', 'info')
+        return redirect(url_for('seller_dashboard'))
+    
+    if request.method == 'POST':
+        name = request.form.get('name')
+        description = request.form.get('description')
+        
+        logo = None
+        if 'logo' in request.files:
+            file = request.files['logo']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"shop_{user.id}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                logo = filename
+        
+        shop = Shop(
+            seller_id=user.id,
+            name=name,
+            description=description,
+            logo=logo
+        )
+        db.session.add(shop)
+        db.session.commit()
+        
+        log_action('SHOP_CREATED', 'Shop', shop.id, f'Shop: {name}')
+        flash('Shop created successfully!', 'success')
+        return redirect(url_for('seller_dashboard'))
+    
+    return render_template('create_shop.html')
+
+
+@app.route('/seller/products')
+@login_required
+@role_required('seller')
+def seller_products():
+    user = User.query.get(session['user_id'])
+    products = Product.query.filter_by(shop_id=user.shop.id).all()
+    return render_template('seller_products.html', products=products)
+
+
+@app.route('/seller/product/create', methods=['GET', 'POST'])
+@login_required
+@role_required('seller')
+def create_product():
+    user = User.query.get(session['user_id'])
+    categories = Category.query.all()
+    
+    if request.method == 'POST':
+        name = request.form.get('name')
+        description = request.form.get('description')
+        price = request.form.get('price')
+        stock = request.form.get('stock')
+        category_id = request.form.get('category_id')
+        
+        image = None
+        if 'image' in request.files:
+            file = request.files['image']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"product_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                image = filename
+        
+        product = Product(
+            shop_id=user.shop.id,
+            category_id=category_id,
+            name=name,
+            description=description,
+            price=price,
+            stock=stock,
+            image=image
+        )
+        db.session.add(product)
+        db.session.commit()
+        
+        log_action('PRODUCT_CREATED', 'Product', product.id, f'Product: {name}')
+        flash('Product created successfully!', 'success')
+        return redirect(url_for('seller_products'))
+    
+    return render_template('create_product.html', categories=categories)
+
+
+@app.route('/seller/product/<int:product_id>/edit', methods=['GET', 'POST'])
+@login_required
+@role_required('seller')
+def edit_product(product_id):
+    user = User.query.get(session['user_id'])
+    product = Product.query.get_or_404(product_id)
+    
+    if product.shop_id != user.shop.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('seller_products'))
+    
+    categories = Category.query.all()
+    
+    if request.method == 'POST':
+        product.name = request.form.get('name')
+        product.description = request.form.get('description')
+        product.price = request.form.get('price')
+        product.stock = request.form.get('stock')
+        product.category_id = request.form.get('category_id')
+        
+        if 'image' in request.files:
+            file = request.files['image']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"product_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                product.image = filename
+        
+        db.session.commit()
+        
+        log_action('PRODUCT_UPDATED', 'Product', product.id, f'Updated: {product.name}')
+        flash('Product updated successfully!', 'success')
+        return redirect(url_for('seller_products'))
+    
+    return render_template('edit_product.html', product=product, categories=categories)
+
+
+@app.route('/seller/product/<int:product_id>/delete', methods=['POST'])
+@login_required
+@role_required('seller')
+def delete_product(product_id):
+    user = User.query.get(session['user_id'])
+    product = Product.query.get_or_404(product_id)
+    
+    if product.shop_id != user.shop.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('seller_products'))
+    
+    log_action('PRODUCT_DELETED', 'Product', product.id, f'Deleted: {product.name}')
+    db.session.delete(product)
+    db.session.commit()
+    
+    flash('Product deleted successfully!', 'success')
+    return redirect(url_for('seller_products'))
+
+
+@app.route('/seller/orders')
+@login_required
+@role_required('seller')
+def seller_orders():
+    user = User.query.get(session['user_id'])
+    orders = Order.query.filter_by(shop_id=user.shop.id)\
+        .order_by(Order.created_at.desc()).all()
+    return render_template('seller_orders.html', orders=orders)
+
+
+@app.route('/seller/order/<int:order_id>')
+@login_required
+@role_required('seller')
+def seller_order_detail(order_id):
+    user = User.query.get(session['user_id'])
+    order = Order.query.get_or_404(order_id)
+    
+    if order.shop_id != user.shop.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('seller_orders'))
+    
+    # Generate QR code for pickup if READY_FOR_PICKUP
+    qr_data = None
+    if order.status == 'READY_FOR_PICKUP' and order.pickup_token:
+        qr_data = generate_qr_code(order.pickup_token)
+    
+    return render_template('seller_order_detail.html', order=order, qr_data=qr_data)
+
+
+@app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
+@login_required
+@role_required('seller')
+def mark_order_ready(order_id):
+    user = User.query.get(session['user_id'])
+    order = Order.query.get_or_404(order_id)
+    
+    if order.shop_id != user.shop.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('seller_orders'))
+    
+    if order.status != 'PENDING_PAYMENT':
+        flash('Order cannot be marked as ready.', 'warning')
+        return redirect(url_for('seller_order_detail', order_id=order_id))
+    
+    # Generate pickup token for courier
+    order.pickup_token = generate_qr_token(order.id, 'pickup')
+    order.status = 'READY_FOR_PICKUP'
+    db.session.commit()
+    
+    log_action('ORDER_READY_FOR_PICKUP', 'Order', order.id, f'Order {order.order_number}')
+    
+    # Notify customer
+    send_email(
+        order.customer.email,
+        'Order Ready for Pickup',
+        f'Your order {order.order_number} is ready for pickup!'
+    )
+    
+    flash('Order marked as ready for pickup!', 'success')
+    return redirect(url_for('seller_order_detail', order_id=order_id))
+
+
+# ==================== COURIER ROUTES ====================
+
+@app.route('/courier/dashboard')
+@login_required
+@role_required('courier')
+def courier_dashboard():
+    # Show available orders to pickup
+    available_orders = Order.query.filter_by(status='READY_FOR_PICKUP', courier_id=None)\
+        .order_by(Order.created_at.desc()).all()
+    
+    # Show assigned orders
+    my_orders = Order.query.filter_by(courier_id=session['user_id'])\
+        .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER']))\
+        .order_by(Order.created_at.desc()).all()
+    
+    return render_template('courier_dashboard.html', 
+        available_orders=available_orders,
+        my_orders=my_orders
+    )
+
+
+@app.route('/courier/pickup-manifest')
+@login_required
+@role_required('courier')
+def courier_pickup_manifest():
+    # Orders ready for this courier to pickup
+    orders = Order.query.filter_by(courier_id=session['user_id'], status='READY_FOR_PICKUP').all()
+    return render_template('courier_manifest.html', orders=orders, title='Pickup Manifest')
+
+
+@app.route('/courier/scan-pickup', methods=['GET', 'POST'])
+@login_required
+@role_required('courier')
+def courier_scan_pickup():
+    if request.method == 'POST':
+        token = request.form.get('token')
+        
+        payload = verify_qr_token(token)
+        if not payload or payload.get('type') != 'pickup':
+            flash('Invalid or expired QR code.', 'danger')
+            return redirect(url_for('courier_scan_pickup'))
+        
+        order = Order.query.get(payload['order_id'])
+        if not order or order.status != 'READY_FOR_PICKUP':
+            flash('Order not ready for pickup.', 'warning')
+            return redirect(url_for('courier_scan_pickup'))
+        
+        # Assign courier and generate rider token
+        order.courier_id = session['user_id']
+        order.delivery_token = generate_qr_token(order.id, 'delivery')
+        order.status = 'IN_TRANSIT_TO_RIDER'
+        db.session.commit()
+        
+        log_action('ORDER_PICKED_UP', 'Order', order.id, f'Courier picked up {order.order_number}')
+        
+        # Notify customer
+        send_email(
+            order.customer.email,
+            'Order Picked Up',
+            f'Your order {order.order_number} has been picked up and is on the way!'
+        )
+        
+        flash(f'Order {order.order_number} picked up successfully!', 'success')
+        return redirect(url_for('courier_dashboard'))
+    
+    return render_template('courier_scan_pickup.html')
+
+
+@app.route('/courier/handoff/<int:order_id>')
+@login_required
+@role_required('courier')
+def courier_handoff_qr(order_id):
+    order = Order.query.get_or_404(order_id)
+    
+    if order.courier_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+    
+    if order.status != 'IN_TRANSIT_TO_RIDER':
+        flash('Order not ready for handoff.', 'warning')
+        return redirect(url_for('courier_dashboard'))
+    
+    # Generate QR for rider to scan
+    qr_data = generate_qr_code(order.delivery_token)
+    
+    return render_template('courier_handoff.html', order=order, qr_data=qr_data)
+
+
+# ==================== RIDER ROUTES ====================
+
+@app.route('/rider/dashboard')
+@login_required
+@role_required('rider')
+def rider_dashboard():
+    # Orders ready for rider pickup from courier
+    available_orders = Order.query.filter_by(status='IN_TRANSIT_TO_RIDER', rider_id=None)\
+        .order_by(Order.created_at.desc()).all()
+    
+    # Orders assigned to this rider
+    my_orders = Order.query.filter_by(rider_id=session['user_id'])\
+        .filter(Order.status.in_(['OUT_FOR_DELIVERY']))\
+        .order_by(Order.created_at.desc()).all()
+    
+    return render_template('rider_dashboard.html',
+        available_orders=available_orders,
+        my_orders=my_orders
+    )
+
+
+@app.route('/rider/delivery-manifest')
+@login_required
+@role_required('rider')
+def rider_delivery_manifest():
+    orders = Order.query.filter_by(rider_id=session['user_id'], status='OUT_FOR_DELIVERY').all()
+    return render_template('rider_manifest.html', orders=orders, title='Delivery Manifest')
+
+
+@app.route('/rider/scan-from-courier', methods=['GET', 'POST'])
+@login_required
+@role_required('rider')
+def rider_scan_from_courier():
+    if request.method == 'POST':
+        token = request.form.get('token')
+        
+        payload = verify_qr_token(token)
+        if not payload or payload.get('type') != 'delivery':
+            flash('Invalid or expired QR code.', 'danger')
+            return redirect(url_for('rider_scan_from_courier'))
+        
+        order = Order.query.get(payload['order_id'])
+        if not order or order.status != 'IN_TRANSIT_TO_RIDER':
+            flash('Order not available for pickup.', 'warning')
+            return redirect(url_for('rider_scan_from_courier'))
+        
+        # Assign rider
+        order.rider_id = session['user_id']
+        order.status = 'OUT_FOR_DELIVERY'
+        db.session.commit()
+        
+        log_action('ORDER_OUT_FOR_DELIVERY', 'Order', order.id, f'Rider received {order.order_number}')
+        
+        # Notify customer
+        send_email(
+            order.customer.email,
+            'Order Out for Delivery',
+            f'Your order {order.order_number} is out for delivery!'
+        )
+        
+        flash(f'Order {order.order_number} received for delivery!', 'success')
+        return redirect(url_for('rider_dashboard'))
+    
+    return render_template('rider_scan_courier.html')
+
+
+@app.route('/rider/confirm-delivery/<int:order_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('rider')
+def rider_confirm_delivery(order_id):
+    order = Order.query.get_or_404(order_id)
+    
+    if order.rider_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('rider_dashboard'))
+    
+    if order.status != 'OUT_FOR_DELIVERY':
+        flash('Order not ready for delivery confirmation.', 'warning')
+        return redirect(url_for('rider_dashboard'))
+    
+    if request.method == 'POST':
+        # Customer should scan QR to confirm
+        token = request.form.get('token')
+        
+        payload = verify_qr_token(token)
+        if not payload or payload.get('type') != 'delivery' or payload['order_id'] != order_id:
+            flash('Invalid delivery confirmation.', 'danger')
+            return redirect(url_for('rider_confirm_delivery', order_id=order_id))
+        
+        order.status = 'DELIVERED'
+        db.session.commit()
+        
+        log_action('ORDER_DELIVERED', 'Order', order.id, f'Order {order.order_number} delivered')
+        
+        # Notify customer and seller
+        send_email(
+            order.customer.email,
+            'Order Delivered',
+            f'Your order {order.order_number} has been delivered successfully!'
+        )
+        
+        flash(f'Order {order.order_number} delivered successfully!', 'success')
+        return redirect(url_for('rider_dashboard'))
+    
+    # Show QR for customer to scan
+    qr_data = generate_qr_code(order.delivery_token)
+    return render_template('rider_delivery_confirm.html', order=order, qr_data=qr_data)
+
+
+@app.route('/rider/history')
+@login_required
+@role_required('rider')
+def rider_history():
+    orders = Order.query.filter_by(rider_id=session['user_id'])\
+        .order_by(Order.updated_at.desc()).all()
+    return render_template('rider_history.html', orders=orders)
+
+
+# ==================== ADMIN ROUTES ====================
+
+@app.route('/admin/dashboard')
+@login_required
+@role_required('admin')
+def admin_dashboard():
+    # Statistics
+    total_users = User.query.count()
+    total_sellers = User.query.filter_by(role='seller').count()
+    total_orders = Order.query.count()
+    total_products = Product.query.count()
+    pending_approvals = User.query.filter_by(is_approved=False).count()
+    
+    recent_logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(10).all()
+    
+    return render_template('admin_dashboard.html',
+        total_users=total_users,
+        total_sellers=total_sellers,
+        total_orders=total_orders,
+        total_products=total_products,
+        pending_approvals=pending_approvals,
+        recent_logs=recent_logs
+    )
+
+
+@app.route('/admin/approvals')
+@login_required
+@role_required('admin')
+def admin_approvals():
+    pending_users = User.query.filter_by(is_approved=False).all()
+    return render_template('admin_approvals.html', pending_users=pending_users)
+
+
+@app.route('/admin/approve/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def approve_user(user_id):
+    user = User.query.get_or_404(user_id)
+    user.is_approved = True
+    db.session.commit()
+    
+    log_action('USER_APPROVED', 'User', user.id, f'Approved {user.role}: {user.email}')
+    
+    # Send approval email
+    send_email(
+        user.email,
+        'Account Approved',
+        f'Your {user.role} account has been approved! You can now log in.'
+    )
+    
+    flash(f'{user.role.capitalize()} account approved!', 'success')
+    return redirect(url_for('admin_approvals'))
+
+
+@app.route('/admin/reject/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def reject_user(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    log_action('USER_REJECTED', 'User', user.id, f'Rejected {user.role}: {user.email}')
+    
+    send_email(
+        user.email,
+        'Account Application',
+        f'Unfortunately, your {user.role} account application was not approved.'
+    )
+    
+    db.session.delete(user)
+    db.session.commit()
+    
+    flash('User account rejected and removed.', 'info')
+    return redirect(url_for('admin_approvals'))
+
+
+@app.route('/admin/users')
+@login_required
+@role_required('admin')
+def admin_users():
+    users = User.query.order_by(User.created_at.desc()).all()
+    return render_template('admin_users.html', users=users)
+
+
+@app.route('/admin/categories', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def admin_categories():
+    if request.method == 'POST':
+        name = request.form.get('name')
+        description = request.form.get('description')
+        icon = request.form.get('icon')
+        
+        category = Category(name=name, description=description, icon=icon)
+        db.session.add(category)
+        db.session.commit()
+        
+        log_action('CATEGORY_CREATED', 'Category', category.id, f'Created: {name}')
+        flash('Category created successfully!', 'success')
+        return redirect(url_for('admin_categories'))
+    
+    categories = Category.query.all()
+    return render_template('admin_categories.html', categories=categories)
+
+
+@app.route('/admin/category/<int:category_id>/delete', methods=['POST'])
+@login_required
+@role_required('admin')
+def delete_category(category_id):
+    category = Category.query.get_or_404(category_id)
+    
+    log_action('CATEGORY_DELETED', 'Category', category.id, f'Deleted: {category.name}')
+    
+    db.session.delete(category)
+    db.session.commit()
+    
+    flash('Category deleted successfully!', 'success')
+    return redirect(url_for('admin_categories'))
+
+
+@app.route('/admin/orders')
+@login_required
+@role_required('admin')
+def admin_orders():
+    orders = Order.query.order_by(Order.created_at.desc()).all()
+    return render_template('admin_orders.html', orders=orders)
+
+
+@app.route('/admin/analytics')
+@login_required
+@role_required('admin')
+def admin_analytics():
+    # Sales analytics
+    from sqlalchemy import func
+    
+    total_revenue = db.session.query(func.sum(Order.total_amount))\
+        .filter(Order.status == 'DELIVERED').scalar() or 0
+        
+    total_commission = db.session.query(
+        func.sum(Order.commission_amount)
+    ).filter(Order.status == 'DELIVERED').scalar() or 0
+
+    seller_earnings = db.session.query(
+        func.sum(Order.seller_amount)
+    ).filter(Order.status == 'DELIVERED').scalar() or 0
+    
+    orders_by_status = db.session.query(
+        Order.status, func.count(Order.id)
+    ).group_by(Order.status).all()
+    
+    top_products = db.session.query(
+        Product.name, func.sum(OrderItem.quantity).label('total')
+    ).join(OrderItem).group_by(Product.id)\
+        .order_by(func.sum(OrderItem.quantity).desc()).limit(10).all()
+    
+    
+    return render_template('admin_analytics.html',
+        total_revenue=total_revenue,
+        total_commission=total_commission,
+        seller_earnings=seller_earnings,
+        orders_by_status=orders_by_status,
+        top_products=top_products
+    )
+
+
+@app.route('/admin/logs')
+@login_required
+@role_required('admin')
+def admin_logs():
+    page = request.args.get('page', 1, type=int)
+    logs = AuditLog.query.order_by(AuditLog.created_at.desc())\
+        .paginate(page=page, per_page=50)
+    return render_template('admin_logs.html', logs=logs)
+
+
+# ==================== API ROUTES FOR QR SCANNING ====================
+
+@app.route('/api/qr/verify', methods=['POST'])
+@login_required
+def api_verify_qr():
+    """Verify QR token and return order info"""
+    token = request.json.get('token')
+    
+    payload = verify_qr_token(token)
+    if not payload:
+        return jsonify({'success': False, 'message': 'Invalid or expired token'}), 400
+    
+    order = Order.query.get(payload['order_id'])
+    if not order:
+        return jsonify({'success': False, 'message': 'Order not found'}), 404
+    
+    return jsonify({
+        'success': True,
+        'order_id': order.id,
+        'order_number': order.order_number,
+        'status': order.status,
+        'type': payload['type']
+    })
+
+
+# ==================== INITIALIZE DATABASE ====================
+
+@app.before_request
+def create_tables():
+    """Create tables on first request"""
+    if not hasattr(app, 'tables_created'):
+        db.create_all()
+        
+        # Create default admin if not exists
+        admin = User.query.filter_by(email='admin@epicuremart.com').first()
+        if not admin:
+            admin = User(
+                email='admin@epicuremart.com',
+                role='admin',
+                full_name='System Admin',
+                is_verified=True,
+                is_approved=True
+            )
+            admin.set_password('admin123')
+            db.session.add(admin)
+        
+        # Create default categories
+        if Category.query.count() == 0:
+            categories = [
+                Category(name='Baking Supplies & Ingredients', icon='🧁'),
+                Category(name='Coffee, Tea & Beverages', icon='☕'),
+                Category(name='Snacks & Candy', icon='🍬'),
+                Category(name='Specialty Foods & International Cuisines', icon='🌍'),
+                Category(name='Organic and Health Foods', icon='🥗'),
+                Category(name='Meal Kits & Prepped Foods', icon='🍱')
+            ]
+            db.session.add_all(categories)
+        
+        db.session.commit()
+        app.tables_created = True
+
+
+if __name__ == '__main__':
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    app.run(debug=True, port=5000)

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Confirm Delivery</h5>
+                </div>
+                <div class="card-body">
+                    <h3 class="text-center mb-4">Order {{ order.order_number }}</h3>
+                    
+                    <!-- Customer Info -->
+                    <div class="alert alert-info">
+                        <h5><i class="fas fa-user"></i> Customer Information</h5>
+                        <p class="mb-1"><strong>Name:</strong> {{ order.customer.full_name }}</p>
+                        <p class="mb-1"><strong>Phone:</strong> {{ order.customer.phone }}</p>
+                        <p class="mb-0"><strong>Address:</strong> {{ order.delivery_address.full_address }}, {{ order.delivery_address.city }}</p>
+                    </div>
+
+                    <!-- QR Code -->
+                    <div class="qr-code-container mb-4">
+                        <h5><i class="fas fa-qrcode"></i> Customer Scans This</h5>
+                        <img src="data:image/png;base64,{{ qr_data }}" alt="Delivery QR Code" class="img-fluid">
+                        <p class="mt-3 text-muted">
+                            Ask the customer to scan this QR code to confirm delivery
+                        </p>
+                    </div>
+
+                    <!-- Manual Confirmation -->
+                    <form method="POST">
+                        <input type="hidden" name="token" value="{{ order.delivery_token }}">
+                        <button type="submit" class="btn btn-success w-100 btn-lg">
+                            <i class="fas fa-check-circle"></i> Mark as Delivered
+                        </button>
+                    </form>
+
+                    <a href="{{ url_for('rider_dashboard') }}" class="btn btn-link w-100 mt-3">
+                        <i class="fas fa-arrow-left"></i> Back
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

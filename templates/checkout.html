@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h2 class="mb-4">Checkout</h2>
+    
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-body">
+                    <h4>Delivery Address</h4>
+                    <form method="POST">
+                        {% if addresses %}
+                            {% for address in addresses %}
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="radio" name="address_id" value="{{ address.id }}" id="addr{{ address.id }}" {% if address.is_default %}checked{% endif %}>
+                                <label class="form-check-label" for="addr{{ address.id }}">
+                                    <strong>{{ address.label }}</strong><br>
+                                    {{ address.full_address }}, {{ address.city }} {{ address.postal_code }}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="alert alert-warning">
+                                You need to add a delivery address first.
+                                <a href="#" data-bs-toggle="modal" data-bs-target="#addAddressModal">Add Address</a>
+                            </div>
+                        {% endif %}
+                        
+                        {% if addresses %}
+                        <button type="submit" class="btn btn-primary btn-lg w-100 mt-3">
+                            <i class="fas fa-check"></i> Place Order
+                        </button>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

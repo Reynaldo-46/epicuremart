@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <!-- Hero Section -->
+    <div class="hero-section-new">
+        <div class="row align-items-center">
+            <div class="col-lg-6 position-relative" style="z-index: 2;">
+                <h1 class="hero-title mb-4">Discover Premium Food Delivered Fast</h1>
+                <p class="hero-subtitle mb-5">Experience the future of food delivery with QR-powered tracking. From local artisans to your doorstep.</p>
+                <div class="d-flex gap-3 flex-wrap mb-5">
+                    <a href="{{ url_for('browse') }}" class="btn btn-hero-primary">
+                        <i class="fas fa-shopping-basket me-2"></i>START SHOPPING
+                    </a>
+                    {% if not session.user_id %}
+                    <a href="{{ url_for('register') }}" class="btn btn-hero-secondary">
+                        <i class="fas fa-store me-2"></i>BECOME A SELLER
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="stats-row">
+                    <div class="stat-item">
+                        <div class="stat-number">500+</div>
+                        <div class="stat-label">Products</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">50+</div>
+                        <div class="stat-label">Local Sellers</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">1000+</div>
+                        <div class="stat-label">Happy Customers</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6 text-center d-none d-lg-block position-relative" style="z-index: 2;">
+                <div class="hero-basket">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" width="400" height="400">
+                        <!-- Basket Body -->
+                        <ellipse cx="100" cy="160" rx="70" ry="15" fill="#cbd5e1" opacity="0.3"/>
+                        <path d="M 40 100 Q 40 160 100 170 Q 160 160 160 100 L 140 60 L 60 60 Z" 
+                              fill="#e2e8f0" stroke="#1e293b" stroke-width="4"/>
+                        <!-- Basket Weave Pattern -->
+                        <line x1="60" y1="70" x2="140" y2="70" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="55" y1="85" x2="145" y2="85" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="50" y1="100" x2="150" y2="100" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="48" y1="115" x2="152" y2="115" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="46" y1="130" x2="154" y2="130" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="45" y1="145" x2="155" y2="145" stroke="#94a3b8" stroke-width="2"/>
+                        <!-- Vertical lines -->
+                        <line x1="70" y1="60" x2="65" y2="155" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="85" y1="60" x2="80" y2="160" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="100" y1="60" x2="100" y2="165" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="115" y1="60" x2="120" y2="160" stroke="#94a3b8" stroke-width="2"/>
+                        <line x1="130" y1="60" x2="135" y2="155" stroke="#94a3b8" stroke-width="2"/>
+                        <!-- Handle -->
+                        <path d="M 60 60 Q 100 20 140 60" fill="none" stroke="#1e293b" stroke-width="5" stroke-linecap="round"/>
+                        <!-- Food items in basket -->
+                        <circle cx="80" cy="90" r="12" fill="#3b82f6"/>
+                        <circle cx="110" cy="95" r="15" fill="#2563eb"/>
+                        <circle cx="95" cy="110" r="10" fill="#1d4ed8"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Features -->
+    <div class="row mb-5 g-4">
+        <div class="col-md-4">
+            <div class="card h-100 text-center p-4">
+                <div class="mb-3">
+                    <i class="fas fa-qrcode fa-3x" style="color: var(--primary);"></i>
+                </div>
+                <h4 class="fw-bold mb-3">QR Tracking</h4>
+                <p class="text-muted">Real-time order tracking with secure QR code verification at every step</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100 text-center p-4">
+                <div class="mb-3">
+                    <i class="fas fa-shipping-fast fa-3x" style="color: var(--success);"></i>
+                </div>
+                <h4 class="fw-bold mb-3">Fast Delivery</h4>
+                <p class="text-muted">Professional courier network ensuring your orders arrive fresh and on time</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100 text-center p-4">
+                <div class="mb-3">
+                    <i class="fas fa-shield-alt fa-3x" style="color: var(--info);"></i>
+                </div>
+                <h4 class="fw-bold mb-3">Secure Platform</h4>
+                <p class="text-muted">Encrypted transactions and verified sellers for your peace of mind</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Categories -->
+    <div class="mb-5">
+        <div class="text-center mb-5">
+            <h2 class="display-5 fw-bold mb-3">Shop by Category</h2>
+            <p class="lead text-muted">Explore curated collections from local artisans and specialty food vendors</p>
+        </div>
+        <div class="row g-4">
+            {% for category in categories %}
+            <div class="col-6 col-md-4 col-lg-2">
+                <a href="{{ url_for('browse', category=category.id) }}" class="text-decoration-none">
+                    <div class="card text-center h-100 p-4 category-card">
+                        <div style="font-size: 4rem;" class="mb-3">{{ category.icon }}</div>
+                        <h6 class="fw-bold mb-0">{{ category.name.split('&')[0].strip() }}</h6>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Featured Products -->
+    <div class="mb-5">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2 class="display-6 fw-bold mb-2">Featured Products</h2>
+                <p class="text-muted mb-0">Handpicked selections from our premium sellers</p>
+            </div>
+            <a href="{{ url_for('browse') }}" class="btn btn-outline-primary">
+                View All <i class="fas fa-arrow-right ms-2"></i>
+            </a>
+        </div>
+        <div class="row g-4">
+            {% for product in products %}
+            <div class="col-sm-6 col-lg-3">
+                <div class="card product-card h-100">
+                    {% if product.image %}
+                    <img src="{{ url_for('static', filename='uploads/' + product.image) }}" class="product-image" alt="{{ product.name }}">
+                    {% else %}
+                    <div class="product-image bg-gradient d-flex align-items-center justify-content-center" style="background: var(--gradient-primary);">
+                        <i class="fas fa-image fa-3x text-white opacity-50"></i>
+                    </div>
+                    {% endif %}
+                    <div class="product-overlay">
+                        {% if product.stock < 10 %}
+                        <span class="badge bg-danger">Low Stock!</span>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <small class="text-muted fw-semibold">
+                                <i class="fas fa-store me-1"></i>{{ product.shop.name }}
+                            </small>
+                        </div>
+                        <h5 class="card-title fw-bold mb-2">{{ product.name }}</h5>
+                        <p class="card-text text-muted small mb-3">{{ product.description[:60] }}...</p>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span class="price">₱{{ "%.2f"|format(product.price) }}</span>
+                            <span class="badge bg-light text-dark">{{ product.stock }} left</span>
+                        </div>
+                        {% if session.user_id and session.role == 'customer' %}
+                        <form method="POST" action="{{ url_for('add_to_cart', product_id=product.id) }}">
+                            <div class="input-group">
+                                <input type="number" name="quantity" class="form-control" value="1" min="1" max="{{ product.stock }}">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-cart-plus"></i>
+                                </button>
+                            </div>
+                        </form>
+                        {% else %}
+                        <a href="{{ url_for('login') }}" class="btn btn-outline-primary w-100">
+                            Login to Purchase
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- CTA Section -->
+    {% if not session.user_id %}
+    <div class="row mb-5">
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100" style="background: var(--gradient-primary); color: white;">
+                <div class="card-body p-5">
+                    <i class="fas fa-store fa-3x mb-3 opacity-75"></i>
+                    <h3 class="fw-bold mb-3">Become a Seller</h3>
+                    <p class="mb-4 opacity-90">Join our marketplace and reach thousands of customers. Start selling your premium products today.</p>
+                    <a href="{{ url_for('register') }}" class="btn btn-light btn-lg">
+                        Get Started <i class="fas fa-arrow-right ms-2"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100" style="background: var(--gradient-success); color: white;">
+                <div class="card-body p-5">
+                    <i class="fas fa-motorcycle fa-3x mb-3 opacity-75"></i>
+                    <h3 class="fw-bold mb-3">Join as Courier/Rider</h3>
+                    <p class="mb-4 opacity-90">Be part of our delivery network. Flexible hours, competitive rates, and cutting-edge QR tracking.</p>
+                    <a href="{{ url_for('register') }}" class="btn btn-light btn-lg">
+                        Apply Now <i class="fas fa-arrow-right ms-2"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- How It Works -->
+    <div class="mb-5">
+        <div class="text-center mb-5">
+            <h2 class="display-5 fw-bold mb-3">How It Works</h2>
+            <p class="lead text-muted">Simple, secure, and tracked every step of the way</p>
+        </div>
+        <div class="row g-4">
+            <div class="col-md-3">
+                <div class="text-center">
+                    <div class="mb-3">
+                        <div class="rounded-circle d-inline-flex align-items-center justify-content-center" 
+                             style="width: 80px; height: 80px; background: var(--gradient-primary);">
+                            <i class="fas fa-search fa-2x text-white"></i>
+                        </div>
+                    </div>
+                    <h5 class="fw-bold mb-2">Browse</h5>
+                    <p class="text-muted">Explore products from verified local sellers</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="text-center">
+                    <div class="mb-3">
+                        <div class="rounded-circle d-inline-flex align-items-center justify-content-center" 
+                             style="width: 80px; height: 80px; background: var(--gradient-success);">
+                            <i class="fas fa-shopping-cart fa-2x text-white"></i>
+                        </div>
+                    </div>
+                    <h5 class="fw-bold mb-2">Order</h5>
+                    <p class="text-muted">Add to cart and checkout securely</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="text-center">
+                    <div class="mb-3">
+                        <div class="rounded-circle d-inline-flex align-items-center justify-content-center" 
+                             style="width: 80px; height: 80px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                            <i class="fas fa-qrcode fa-2x text-white"></i>
+                        </div>
+                    </div>
+                    <h5 class="fw-bold mb-2">Track</h5>
+                    <p class="text-muted">Follow your order with QR verification</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="text-center">
+                    <div class="mb-3">
+                        <div class="rounded-circle d-inline-flex align-items-center justify-content-center" 
+                             style="width: 80px; height: 80px; background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);">
+                            <i class="fas fa-check-circle fa-2x text-white"></i>
+                        </div>
+                    </div>
+                    <h5 class="fw-bold mb-2">Receive</h5>
+                    <p class="text-muted">Get your order fresh and verified</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .category-card {
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+    
+    .category-card:hover {
+        transform: translateY(-10px) scale(1.05);
+        box-shadow: 0 15px 30px rgba(0, 0, 0, 0.15);
+    }
+</style>
+{% endblock %}

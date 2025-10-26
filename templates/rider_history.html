@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 class="mb-4"><i class="fas fa-history"></i> Delivery History</h2>
+
+    {% if orders %}
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Order #</th>
+                            <th>Customer</th>
+                            <th>Delivery Address</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Delivered On</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in orders %}
+                        <tr>
+                            <td><strong>{{ order.order_number }}</strong></td>
+                            <td>{{ order.customer.full_name }}</td>
+                            <td>{{ order.delivery_address.city }}</td>
+                            <td>₱{{ "%.2f"|format(order.total_amount) }}</td>
+                            <td>
+                                <span class="badge 
+                                    {% if order.status == 'DELIVERED' %}bg-success
+                                    {% elif order.status == 'OUT_FOR_DELIVERY' %}bg-primary
+                                    {% else %}bg-secondary{% endif %}">
+                                    {{ order.status.replace('_', ' ') }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if order.status == 'DELIVERED' %}
+                                    {{ order.updated_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% else %}
+                                    In progress
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Statistics -->
+            <div class="row mt-4">
+                <div class="col-md-4">
+                    <div class="card bg-success text-white">
+                        <div class="card-body text-center">
+                            <h3>{{ orders|selectattr('status', 'equalto', 'DELIVERED')|list|length }}</h3>
+                            <p class="mb-0">Completed Deliveries</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body text-center">
+                            <h3>{{ orders|selectattr('status', 'equalto', 'OUT_FOR_DELIVERY')|list|length }}</h3>
+                            <p class="mb-0">In Progress</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-info text-white">
+                        <div class="card-body text-center">
+                            <h3>₱{{ "%.2f"|format(orders|selectattr('status', 'equalto', 'DELIVERED')|sum(attribute='total_amount')) }}</h3>
+                            <p class="mb-0">Total Delivered</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        No delivery history yet. Start accepting deliveries to build your history!
+    </div>
+    {% endif %}
+
+    <a href="{{ url_for('rider_dashboard') }}" class="btn btn-secondary mt-3">
+        <i class="fas fa-arrow-left"></i> Back to Dashboard
+    </a>
+</div>
+{% endblock %}
