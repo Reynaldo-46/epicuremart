@@ -54,7 +54,7 @@
           💳 Payment
         </button>
       </div>
-      <form class="chat-form" onsubmit="sendMessage(event)">
+      <form class="chat-form" onsubmit="sendPublicMessage(event)">
         <input
           type="text"
           id="chatInput"
@@ -316,6 +316,8 @@
 </style>
 
 <script>
+
+
   function toggleChat() {
     const chatWindow = document.getElementById("chatWindow");
     const isVisible = chatWindow.style.display !== "none";
@@ -327,32 +329,32 @@
     }
   }
 
-  function sendMessage(event) {
+  function sendPublicMessage(event) {
     event.preventDefault();
     const input = document.getElementById("chatInput");
     const message = input.value.trim();
 
     if (!message) return;
 
-    addMessage(message, "user");
+    addPublicMessage(message, "user");
     input.value = "";
 
     // Simulate bot response
     setTimeout(() => {
       const response = getBotResponse(message.toLowerCase());
-      addMessage(response, "bot");
+      addPublicMessage(response, "bot");
     }, 1000);
   }
 
   function sendQuickReply(message) {
-    addMessage(message, "user");
+    addPublicMessage(message, "user");
     setTimeout(() => {
       const response = getBotResponse(message.toLowerCase());
-      addMessage(response, "bot");
+      addPublicMessage(response, "bot");
     }, 1000);
   }
 
-  function addMessage(text, type) {
+  function addPublicMessage(text, type) {
     const messagesDiv = document.getElementById("chatMessages");
     const messageDiv = document.createElement("div");
     messageDiv.className = `chat-message ${type}-message`;

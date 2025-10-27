@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="chat-container">
+                <!-- Chat Header -->
+                <div class="chat-header">
+                    <div class="d-flex align-items-center">
+                        <a href="{{ url_for('messages_inbox') }}" class="btn btn-link text-white me-3">
+                            <i class="fas fa-arrow-left"></i>
+                        </a>
+                        <div class="avatar-circle me-3">
+                            <i class="fas {% if session.role == 'customer' %}fa-store{% else %}fa-user{% endif %} fa-lg"></i>
+                        </div>
+                        <div>
+                            <h5 class="mb-0">
+                                {% if session.role == 'customer' %}
+                                    {{ conversation.shop.name }}
+                                {% else %}
+                                    {{ conversation.customer.full_name }}
+                                {% endif %}
+                            </h5>
+                            <small class="text-white-50">
+                                <i class="fas fa-circle text-success" style="font-size: 8px;"></i> Online
+                            </small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Messages -->
+                <div class="chat-messages" id="chatMessages">
+                    {% if messages %}
+                        {% for message in messages %}
+                        <div class="message {% if message.sender_id == session.user_id %}message-own{% else %}message-other{% endif %}" 
+                             data-message-id="{{ message.id }}">
+                            <div class="message-bubble">
+                                <p class="mb-1">{{ message.message_text }}</p>
+                                <small class="message-time">{{ message.created_at.strftime('%I:%M %p') }}</small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="text-center p-5 text-muted">
+                        <i class="fas fa-comments fa-3x mb-3"></i>
+                        <p>Start your conversation</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Chat Input -->
+                <div class="chat-input-area">
+                    <form id="messageForm" onsubmit="sendMessage(event)">
+                        <div class="input-group">
+                            <input type="text" id="messageInput" name="message_text" class="form-control" 
+                                   placeholder="Type your message..." required autocomplete="off">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .chat-container {
+        background: white;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        height: 600px;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .chat-header {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+        padding: 1.25rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .avatar-circle {
+        width: 45px;
+        height: 45px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1.5rem;
+        background: #f8fafc;
+    }
+    
+    .message {
+        margin-bottom: 1rem;
+        animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .message-bubble {
+        max-width: 70%;
+        padding: 0.875rem 1.125rem;
+        border-radius: 18px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+    
+    .message-own {
+        text-align: right;
+    }
+    
+    .message-own .message-bubble {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+        margin-left: auto;
+        border-bottom-right-radius: 4px;
+    }
+    
+    .message-other .message-bubble {
+        background: white;
+        border-bottom-left-radius: 4px;
+    }
+    
+    .message-time {
+        font-size: 0.75rem;
+        opacity: 0.7;
+    }
+    
+    .chat-input-area {
+        padding: 1rem;
+        background: white;
+        border-top: 1px solid #e2e8f0;
+    }
+    
+    .chat-input-area .form-control {
+        border-radius: 24px;
+        padding: 0.75rem 1.25rem;
+        border: 2px solid #e2e8f0;
+    }
+    
+    .chat-input-area .form-control:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    }
+    
+    .chat-input-area .btn-primary {
+        border-radius: 50%;
+        width: 45px;
+        height: auto;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
+
+
+{% endblock %}

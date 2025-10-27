@@ -1,9 +1,4 @@
-"""
-Epicuremart Database Initialization Script
-Run this to set up the database with sample data
-"""
-
-from app import app, db, User, Category, Shop, Product
+from app import app, db, User, Category, Shop, Product, DeliveryFee, Conversation, Message
 from werkzeug.security import generate_password_hash
 
 def init_database():

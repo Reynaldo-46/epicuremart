@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-2"><i class="fas fa-truck me-2"></i>Delivery Fees</h2>
+            <p class="text-muted mb-0">Manage delivery fees for CALABARZON cities</p>
+        </div>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addFeeModal">
+            <i class="fas fa-plus me-2"></i>Add City Fee
+        </button>
+    </div>
+
+    <!-- Fees by Province -->
+    {% set provinces = {'Cavite': [], 'Laguna': [], 'Batangas': [], 'Rizal': [], 'Quezon': []} %}
+    {% for fee in delivery_fees %}
+        {% set _ = provinces[fee.province].append(fee) %}
+    {% endfor %}
+
+    <div class="row">
+        {% for province, fees in provinces.items() %}
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0">{{ province }}</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>City</th>
+                                    <th>Fee</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for fee in fees %}
+                                <tr>
+                                    <td>{{ fee.city }}</td>
+                                    <td><strong class="text-success">₱{{ "%.2f"|format(fee.fee) }}</strong></td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#editFeeModal{{ fee.id }}">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                
+                                <!-- Edit Modal -->
+                                <div class="modal fade" id="editFeeModal{{ fee.id }}" tabindex="-1">
+                                    <div class="modal-dialog modal-sm">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title">Edit: {{ fee.city }}</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                            </div>
+                                            <form method="POST" action="{{ url_for('update_delivery_fee', fee_id=fee.id) }}">
+                                                <div class="modal-body">
+                                                    <div class="mb-3">
+                                                        <label class="form-label">Delivery Fee (₱)</label>
+                                                        <input type="number" name="fee" class="form-control" 
+                                                               value="{{ fee.fee }}" step="0.01" min="0" required>
+                                                    </div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                                    <button type="submit" class="btn btn-primary">Update</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Statistics -->
+    <div class="row mt-4">
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="fw-bold">{{ delivery_fees|length }}</h3>
+                    <p class="text-muted mb-0">Cities Covered</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="fw-bold text-success">₱{{ "%.2f"|format(avg_fee) }}</h3>
+                    <p class="text-muted mb-0">Average Fee</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="fw-bold text-primary">₱{{ "%.2f"|format(min_fee) }} - ₱{{ "%.2f"|format(max_fee) }}</h3>
+                    <p class="text-muted mb-0">Fee Range</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Fee Modal -->
+<div class="modal fade" id="addFeeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Delivery Fee</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('add_delivery_fee') }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Province *</label>
+                        <select name="province" class="form-select" required>
+                            <option value="Cavite">Cavite</option>
+                            <option value="Laguna">Laguna</option>
+                            <option value="Batangas">Batangas</option>
+                            <option value="Rizal">Rizal</option>
+                            <option value="Quezon">Quezon</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">City *</label>
+                        <input type="text" name="city" class="form-control" 
+                               placeholder="City name" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Delivery Fee (₱) *</label>
+                        <input type="number" name="fee" class="form-control" 
+                               placeholder="50.00" step="0.01" min="0" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Fee</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

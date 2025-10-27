@@ -132,6 +132,8 @@ class Order(db.Model):
     
     delivery_address_id = db.Column(db.Integer, db.ForeignKey('addresses.id'))
     total_amount = db.Column(Numeric(10, 2), nullable=False)
+    delivery_fee = db.Column(Numeric(10, 2), default=0.00)
+    subtotal = db.Column(Numeric(10, 2), nullable=False)
     commission_rate = db.Column(Numeric(5, 2), default=5.00)  # 5% commission
     commission_amount = db.Column(Numeric(10, 2), default=0.00)
     seller_amount = db.Column(Numeric(10, 2), default=0.00)
@@ -161,6 +163,30 @@ class OrderItem(db.Model):
     
     product = db.relationship('Product')
 
+class ProductReview(db.Model):
+    __tablename__ = 'product_reviews'
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False)
+    review_text = db.Column(db.Text)
+    review_images = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    product = db.relationship('Product', backref='reviews')
+    user = db.relationship('User')
+    order = db.relationship('Order')
+
+
+class DeliveryFee(db.Model):
+    __tablename__ = 'delivery_fees'
+    id = db.Column(db.Integer, primary_key=True)
+    city = db.Column(db.String(100), nullable=False, unique=True)
+    province = db.Column(db.String(50), nullable=False)
+    fee = db.Column(Numeric(10, 2), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 
 class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
@@ -175,7 +201,32 @@ class AuditLog(db.Model):
     
     user = db.relationship('User')
 
+class Conversation(db.Model):
+    __tablename__ = 'conversations'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False)
+    last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    customer = db.relationship('User', foreign_keys=[customer_id])
+    seller = db.relationship('User', foreign_keys=[seller_id])
+    shop = db.relationship('Shop')
+    messages = db.relationship('Message', backref='conversation', cascade='all, delete-orphan', order_by='Message.created_at')
 
+
+class Message(db.Model):
+    __tablename__ = 'messages'
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    message_text = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    sender = db.relationship('User')
+    
 # ==================== HELPER FUNCTIONS ====================
 
 def allowed_file(filename):
@@ -291,6 +342,7 @@ def generate_order_number():
 def index():
     categories = Category.query.all()
     products = Product.query.filter_by(is_active=True).limit(12).all()
+    # conversation = Conversation.query.all()
     return render_template('index.html', categories=categories, products=products)
 
 
@@ -577,6 +629,9 @@ def delete_address(address_id):
     flash('Address deleted successfully.', 'success')
     return redirect(url_for('customer_profile'))
 
+
+
+
 @app.route('/checkout', methods=['GET', 'POST'])
 @login_required
 @role_required('customer')
@@ -604,12 +659,18 @@ def checkout():
         for shop_id, items in shop_orders.items():
             total = sum([float(p.price) * q for p, q in items])
             
+            commission = total * 0.05
+            seller_amount = total - commission
+            
             order = Order(
                 order_number=generate_order_number(),
                 customer_id=session['user_id'],
                 shop_id=shop_id,
                 delivery_address_id=address_id,
                 total_amount=total,
+                commission_rate=5.00,
+                commission_amount=commission,
+                seller_amount=seller_amount,
                 status='PENDING_PAYMENT'
             )
             db.session.add(order)
@@ -666,13 +727,120 @@ def customer_order_detail(order_id):
     if order.delivery_token:
         qr_data = generate_qr_code(order.delivery_token)
     
-    return render_template('customer_order_detail.html', order=order, qr_data=qr_data)
+    # Check which products can be reviewed
+    reviewable_items = []
+    if order.status == 'DELIVERED':
+        for item in order.items:
+            existing_review = ProductReview.query.filter_by(
+                product_id=item.product_id,
+                user_id=session['user_id'],
+                order_id=order.id
+            ).first()
+            reviewable_items.append({
+                'item': item,
+                'has_review': existing_review is not None,
+                'review': existing_review
+            })
+    
+    return render_template('customer_order_detail.html', 
+        order=order, 
+        qr_data=qr_data,
+        reviewable_items=reviewable_items
+    )
 
 
-"""
-Epicuremart - Part 2: Seller, Courier, Rider, and Admin Routes
-Add this to the main Flask application after the customer routes
-"""
+@app.route('/product/<int:product_id>/review', methods=['POST'])
+@login_required
+@role_required('customer')
+def add_product_review(product_id):
+    order_id = request.form.get('order_id')
+    rating = request.form.get('rating')
+    review_text = request.form.get('review_text')
+    
+    # Verify customer bought this product in this order
+    order = Order.query.get_or_404(order_id)
+    if order.customer_id != session['user_id'] or order.status != 'DELIVERED':
+        flash('You can only review products from delivered orders.', 'danger')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    # Check if already reviewed
+    existing = ProductReview.query.filter_by(
+        product_id=product_id,
+        user_id=session['user_id'],
+        order_id=order_id
+    ).first()
+    
+    if existing:
+        flash('You have already reviewed this product.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    uploaded_images = []
+    for i in range(1, 6):  # Support up to 5 images
+        image_key = f'review_image_{i}'
+        if image_key in request.files:
+            file = request.files[image_key]
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"review_{datetime.now().strftime('%Y%m%d%H%M%S')}_{i}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                uploaded_images.append(filename)
+    
+    review = ProductReview(
+        product_id=product_id,
+        user_id=session['user_id'],
+        order_id=order_id,
+        rating=int(rating),
+        review_text=review_text,
+        review_images=",".join(uploaded_images)
+    )
+    
+    db.session.add(review)
+    db.session.commit()
+    
+    log_action('PRODUCT_REVIEWED', 'ProductReview', review.id, f'{rating} stars')
+    flash('Thank you for your review!', 'success')
+    return redirect(url_for('customer_order_detail', order_id=order_id))
+
+
+@app.route('/product/<int:product_id>')
+def product_detail(product_id):
+    product = Product.query.get_or_404(product_id)
+    
+    # Calculate average rating
+    reviews = ProductReview.query.filter_by(product_id=product_id).all()
+    avg_rating = sum([r.rating for r in reviews]) / len(reviews) if reviews else 0
+    rating_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for review in reviews:
+        rating_counts[review.rating] += 1
+    
+    return render_template('product_detail.html',
+        product=product,
+        reviews=reviews,
+        avg_rating=avg_rating,
+        rating_counts=rating_counts,
+        total_reviews=len(reviews)
+    )
+
+
+
+# @app.route('/customer/order/<int:order_id>')
+# @login_required
+# @role_required('customer')
+# def customer_order_detail(order_id):
+#     order = Order.query.get_or_404(order_id)
+    
+#     if order.customer_id != session['user_id']:
+#         flash('Unauthorized access.', 'danger')
+#         return redirect(url_for('customer_orders'))
+    
+#     # Generate QR code for delivery confirmation
+#     qr_data = None
+#     if order.delivery_token:
+#         qr_data = generate_qr_code(order.delivery_token)
+    
+#     return render_template('customer_order_detail.html', order=order, qr_data=qr_data)
+
 
 # ==================== SELLER ROUTES ====================
 
@@ -1291,6 +1459,167 @@ def admin_analytics():
     )
 
 
+@app.route('/messages')
+@login_required
+def messages_inbox():
+    user = User.query.get(session['user_id'])
+    
+    if user.role == 'customer':
+        conversations = Conversation.query.filter_by(customer_id=user.id)\
+            .order_by(Conversation.last_message_at.desc()).all()
+    elif user.role == 'seller':
+        conversations = Conversation.query.filter_by(seller_id=user.id)\
+            .order_by(Conversation.last_message_at.desc()).all()
+    else:
+        flash('Only customers and sellers can access messages.', 'warning')
+        return redirect(url_for('index'))
+    
+    # Count unread messages
+    unread_count = 0
+    for conv in conversations:
+        unread_count += Message.query.filter(
+            Message.conversation_id == conv.id,
+            Message.sender_id != user.id,
+            Message.is_read == False
+        ).count()
+    
+    return render_template('messages_inbox.html', 
+        conversations=conversations,
+        unread_count=unread_count
+    )
+
+
+@app.route('/messages/conversation/<int:conversation_id>')
+@login_required
+def view_conversation(conversation_id):
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Check authorization
+    if user.id not in [conversation.customer_id, conversation.seller_id]:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('messages_inbox'))
+    
+    # Mark messages as read
+    Message.query.filter(
+        Message.conversation_id == conversation_id,
+        Message.sender_id != user.id,
+        Message.is_read == False
+    ).update({'is_read': True})
+    db.session.commit()
+    
+    messages = Message.query.filter_by(conversation_id=conversation_id)\
+        .order_by(Message.created_at.asc()).all()
+    
+    return render_template('conversation.html',
+        conversation=conversation,
+        messages=messages
+    )
+
+
+@app.route('/messages/send/<int:conversation_id>', methods=['POST'])
+@login_required
+def send_message(conversation_id):
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Check authorization
+    if user.id not in [conversation.customer_id, conversation.seller_id]:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+    
+    message_text = request.form.get('message_text', '').strip()
+    print("DEBUG received message_text =", message_text)
+    if not message_text:
+        return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
+    
+    message = Message(
+        conversation_id=conversation_id,
+        sender_id=user.id,
+        message_text=message_text
+    )
+    
+    conversation.last_message_at = datetime.utcnow()
+    
+    db.session.add(message)
+    db.session.commit()
+    
+    log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
+    
+    return jsonify({
+        'success': True,
+        'message': {
+            'id': message.id,
+            'sender_name': user.full_name,
+            'message_text': message.message_text,
+            'created_at': message.created_at.strftime('%I:%M %p'),
+            'is_own': True
+        }
+    })
+
+
+@app.route('/messages/start/<int:shop_id>', methods=['POST'])
+@login_required
+@role_required('customer')
+def start_conversation(shop_id):
+    shop = Shop.query.get_or_404(shop_id)
+    
+    # Check if conversation already exists
+    existing = Conversation.query.filter_by(
+        customer_id=session['user_id'],
+        seller_id=shop.seller_id,
+        shop_id=shop_id
+    ).first()
+    
+    if existing:
+        return redirect(url_for('view_conversation', conversation_id=existing.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        customer_id=session['user_id'],
+        seller_id=shop.seller_id,
+        shop_id=shop_id
+    )
+    
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With shop {shop.name}')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
+@app.route('/messages/check-new/<int:conversation_id>')
+@login_required
+def check_new_messages(conversation_id):
+    """AJAX endpoint to check for new messages"""
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    if user.id not in [conversation.customer_id, conversation.seller_id]:
+        return jsonify({'success': False}), 403
+    
+    last_message_id = request.args.get('last_id', 0, type=int)
+    
+    new_messages = Message.query.filter(
+        Message.conversation_id == conversation_id,
+        Message.id > last_message_id
+    ).order_by(Message.created_at.asc()).all()
+    
+    messages_data = []
+    for msg in new_messages:
+        messages_data.append({
+            'id': msg.id,
+            'sender_name': msg.sender.full_name,
+            'message_text': msg.message_text,
+            'created_at': msg.created_at.strftime('%I:%M %p'),
+            'is_own': msg.sender_id == user.id
+        })
+    
+    return jsonify({
+        'success': True,
+        'messages': messages_data
+    })
+
 @app.route('/admin/logs')
 @login_required
 @role_required('admin')
@@ -1300,7 +1629,62 @@ def admin_logs():
         .paginate(page=page, per_page=50)
     return render_template('admin_logs.html', logs=logs)
 
+@app.route('/admin/delivery-fees')
+@login_required
+@role_required('admin')
+def admin_delivery_fees():
+    from sqlalchemy import func
+    delivery_fees = DeliveryFee.query.order_by(DeliveryFee.province, DeliveryFee.city).all()
+    
+    avg_fee = db.session.query(func.avg(DeliveryFee.fee)).scalar() or 0
+    min_fee = db.session.query(func.min(DeliveryFee.fee)).scalar() or 0
+    max_fee = db.session.query(func.max(DeliveryFee.fee)).scalar() or 0
+    
+    return render_template('admin_delivery_fees.html',
+        delivery_fees=delivery_fees,
+        avg_fee=avg_fee,
+        min_fee=min_fee,
+        max_fee=max_fee
+    )
 
+
+@app.route('/admin/delivery-fees/add', methods=['POST'])
+@login_required
+@role_required('admin')
+def add_delivery_fee():
+    city = request.form.get('city')
+    province = request.form.get('province')
+    fee = request.form.get('fee')
+    
+    existing = DeliveryFee.query.filter_by(city=city).first()
+    if existing:
+        flash('Delivery fee for this city already exists.', 'warning')
+        return redirect(url_for('admin_delivery_fees'))
+    
+    delivery_fee = DeliveryFee(city=city, province=province, fee=fee)
+    db.session.add(delivery_fee)
+    db.session.commit()
+    
+    log_action('DELIVERY_FEE_ADDED', 'DeliveryFee', delivery_fee.id, f'{city}: ₱{fee}')
+    flash(f'Delivery fee added for {city}.', 'success')
+    return redirect(url_for('admin_delivery_fees'))
+
+
+@app.route('/admin/delivery-fees/<int:fee_id>/update', methods=['POST'])
+@login_required
+@role_required('admin')
+def update_delivery_fee(fee_id):
+    delivery_fee = DeliveryFee.query.get_or_404(fee_id)
+    new_fee = request.form.get('fee')
+    old_fee = delivery_fee.fee
+    
+    delivery_fee.fee = new_fee
+    db.session.commit()
+    
+    log_action('DELIVERY_FEE_UPDATED', 'DeliveryFee', fee_id, 
+               f'{delivery_fee.city}: ₱{old_fee} → ₱{new_fee}')
+    flash(f'Delivery fee updated for {delivery_fee.city}.', 'success')
+    return redirect(url_for('admin_delivery_fees'))
 # ==================== API ROUTES FOR QR SCANNING ====================
 
 @app.route('/api/qr/verify', methods=['POST'])
