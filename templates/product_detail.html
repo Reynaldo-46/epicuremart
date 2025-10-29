@@ -87,16 +87,21 @@
                 <div class="row g-3 mb-3">
                     {% if product.stock > 0 %}
                     <div class="col-12">
-                        <form method="POST" action="{{ url_for('add_to_cart', product_id=product.id) }}">
+                        <form method="POST" action="{{ url_for('add_to_cart', product_id=product.id) }}" id="addToCartForm">
                             <div class="row g-3">
                                 <div class="col-auto">
                                     <label class="form-label">Quantity</label>
-                                    <input type="number" name="quantity" class="form-control" 
+                                    <input type="number" name="quantity" id="quantityInput" class="form-control" 
                                            value="1" min="1" max="{{ product.stock }}" style="width: 100px;">
                                 </div>
                                 <div class="col-auto d-flex align-items-end">
                                     <button type="submit" class="btn btn-primary btn-lg">
                                         <i class="fas fa-cart-plus me-2"></i>Add to Cart
+                                    </button>
+                                </div>
+                                <div class="col-auto d-flex align-items-end">
+                                    <button type="button" class="btn btn-success btn-lg" onclick="buyNow()">
+                                        <i class="fas fa-bolt me-2"></i>Buy Now
                                     </button>
                                 </div>
                             </div>
@@ -279,6 +284,25 @@
     function showImageModal(imageSrc) {
         document.getElementById('modalImage').src = imageSrc;
         new bootstrap.Modal(document.getElementById('imageModal')).show();
+    }
+    
+    function buyNow() {
+        // Get the quantity value
+        const quantity = document.getElementById('quantityInput').value;
+        
+        // Create a form and submit it to the buy_now route
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = "{{ url_for('buy_now', product_id=product.id) }}";
+        
+        const quantityInput = document.createElement('input');
+        quantityInput.type = 'hidden';
+        quantityInput.name = 'quantity';
+        quantityInput.value = quantity;
+        
+        form.appendChild(quantityInput);
+        document.body.appendChild(form);
+        form.submit();
     }
 </script>
 {% endblock %}

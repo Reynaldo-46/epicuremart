@@ -589,6 +589,29 @@ def add_to_cart(product_id):
     return redirect(url_for('browse'))
 
 
+@app.route('/buy-now/<int:product_id>', methods=['POST'])
+@login_required
+@role_required('customer')
+def buy_now(product_id):
+    """Buy Now - Skip cart and go directly to checkout with this product"""
+    product = Product.query.get_or_404(product_id)
+    quantity = int(request.form.get('quantity', 1))
+    
+    # Validate stock
+    if product.stock < quantity:
+        flash(f'Only {product.stock} units available.', 'danger')
+        return redirect(url_for('product_detail', product_id=product_id))
+    
+    if product.stock == 0:
+        flash('This product is out of stock.', 'danger')
+        return redirect(url_for('product_detail', product_id=product_id))
+    
+    # Create a temporary cart for immediate checkout
+    session['buy_now_cart'] = {str(product_id): quantity}
+    
+    return redirect(url_for('checkout'))
+
+
 @app.route('/cart/remove/<int:product_id>')
 @login_required
 def remove_from_cart(product_id):
@@ -702,7 +725,14 @@ def delete_address(address_id):
 @login_required
 @role_required('customer')
 def checkout():
-    cart = session.get('cart', {})
+    # Check for buy_now_cart first, then regular cart
+    buy_now_cart = session.get('buy_now_cart', {})
+    regular_cart = session.get('cart', {})
+    
+    # Use buy_now_cart if it exists, otherwise use regular cart
+    cart = buy_now_cart if buy_now_cart else regular_cart
+    is_buy_now = bool(buy_now_cart)
+    
     if not cart:
         flash('Your cart is empty.', 'warning')
         return redirect(url_for('browse'))
@@ -805,7 +835,11 @@ def checkout():
             log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
         
         db.session.commit()
+        
+        # Clear both regular cart and buy_now_cart
         session['cart'] = {}
+        if 'buy_now_cart' in session:
+            session.pop('buy_now_cart')
         
         # Send confirmation email
         user = User.query.get(session['user_id'])
