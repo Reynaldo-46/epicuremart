@@ -622,6 +622,31 @@ def remove_from_cart(product_id):
         flash('Item removed from cart.', 'info')
     return redirect(url_for('view_cart'))
 
+
+@app.route('/cart/update/<int:product_id>', methods=['POST'])
+@login_required
+def update_cart_quantity(product_id):
+    """Update quantity of a product in the cart"""
+    product = Product.query.get_or_404(product_id)
+    new_quantity = int(request.form.get('quantity', 1))
+    
+    # Validate quantity
+    if new_quantity < 1:
+        flash('Quantity must be at least 1.', 'warning')
+        return redirect(url_for('view_cart'))
+    
+    if new_quantity > product.stock:
+        flash(f'Only {product.stock} units available for {product.name}.', 'warning')
+        return redirect(url_for('view_cart'))
+    
+    cart = session.get('cart', {})
+    cart[str(product_id)] = new_quantity
+    session['cart'] = cart
+    
+    flash(f'Updated quantity for {product.name}.', 'success')
+    return redirect(url_for('view_cart'))
+
+
 @app.route('/customer/address/add', methods=['POST'])
 @login_required
 @role_required('customer')
