@@ -17,44 +17,51 @@
 
     <div class="row">
         <div class="col-12">
-            {% if conversations %}
+            {% if conversation_data %}
             <div class="list-group">
-                {% for conv in conversations %}
-                {% set unread = conv.messages | selectattr('sender_id', 'ne', session.user_id) | selectattr('is_read', 'equalto', False) | list | length %}
-                {% set last_msg = conv.messages[-1] if conv.messages else None %}
+                {% for item in conversation_data %}
                 
-                <a href="{{ url_for('view_conversation', conversation_id=conv.id) }}" 
-                   class="list-group-item list-group-item-action {% if unread > 0 %}unread-conversation{% endif %}">
+                <a href="{{ url_for('view_conversation', conversation_id=item.conversation.id) }}" 
+                   class="list-group-item list-group-item-action {% if item.unread_count > 0 %}unread-conversation{% endif %}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="avatar-circle me-3">
-                            <i class="fas {% if session.role == 'customer' %}fa-store{% else %}fa-user{% endif %} fa-2x"></i>
+                            <i class="fas {% if item.other_user.role == 'seller' %}fa-store{% elif item.other_user.role == 'rider' or item.other_user.role == 'courier' %}fa-motorcycle{% else %}fa-user{% endif %} fa-2x"></i>
                         </div>
                         <div class="flex-grow-1">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <h5 class="mb-1 fw-bold">
-                                    {% if session.role == 'customer' %}
-                                        {{ conv.shop.name }}
-                                    {% else %}
-                                        {{ conv.customer.full_name }}
-                                    {% endif %}
-                                    {% if unread > 0 %}
-                                    <span class="badge bg-danger rounded-pill">{{ unread }}</span>
+                                    {{ item.other_user.full_name }}
+                                    {% if item.unread_count > 0 %}
+                                    <span class="badge bg-danger rounded-pill">{{ item.unread_count }}</span>
                                     {% endif %}
                                 </h5>
                                 <small class="text-muted">
-                                    {% if last_msg %}
-                                        {{ last_msg.created_at.strftime('%b %d, %I:%M %p') }}
+                                    {% if item.last_message %}
+                                        {{ item.last_message.created_at.strftime('%b %d, %I:%M %p') }}
                                     {% else %}
-                                        {{ conv.created_at.strftime('%b %d, %I:%M %p') }}
+                                        {{ item.conversation.created_at.strftime('%b %d, %I:%M %p') }}
                                     {% endif %}
                                 </small>
                             </div>
-                            {% if last_msg %}
+                            
+                            {# Show context (shop or order) #}
+                            {% if item.conversation.shop %}
+                            <small class="text-primary mb-1 d-block">
+                                <i class="fas fa-store me-1"></i>{{ item.conversation.shop.name }}
+                            </small>
+                            {% elif item.conversation.order %}
+                            <small class="text-info mb-1 d-block">
+                                <i class="fas fa-box me-1"></i>Order #{{ item.conversation.order.order_number }}
+                            </small>
+                            {% endif %}
+                            
+                            {# Show last message preview #}
+                            {% if item.last_message %}
                             <p class="mb-0 text-muted text-truncate">
-                                {% if last_msg.sender_id == session.user_id %}
+                                {% if item.last_message.sender_id == session.user_id %}
                                 <strong>You:</strong>
                                 {% endif %}
-                                {{ last_msg.message_text }}
+                                {{ item.last_message.message_text }}
                             </p>
                             {% else %}
                             <p class="mb-0 text-muted"><em>Start a conversation</em></p>
@@ -72,8 +79,10 @@
                     <p class="text-muted">
                         {% if session.role == 'customer' %}
                         Start a conversation with a seller by clicking "Contact Seller" on any product page.
-                        {% else %}
+                        {% elif session.role == 'seller' %}
                         You'll see messages from customers here when they contact you.
+                        {% elif session.role in ['rider', 'courier'] %}
+                        You'll see messages from customers and sellers about orders here.
                         {% endif %}
                     </p>
                     {% if session.role == 'customer' %}
@@ -98,6 +107,7 @@
         align-items: center;
         justify-content: center;
         color: white;
+        flex-shrink: 0;
     }
     
     .unread-conversation {
@@ -109,11 +119,20 @@
         transition: all 0.3s ease;
         border-radius: 12px !important;
         margin-bottom: 0.5rem;
+        border: 1px solid #e2e8f0;
     }
     
     .list-group-item:hover {
         transform: translateX(5px);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        background: #fafbfc;
+    }
+    
+    .text-truncate {
+        max-width: 500px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 </style>
 {% endblock %}

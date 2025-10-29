@@ -1769,18 +1769,37 @@ def messages_inbox():
         )
     ).order_by(Conversation.last_message_at.desc()).all()
     
-    # Count unread messages
-    unread_count = 0
+    # Build conversation data with the "other user" and unread count
+    conversation_data = []
+    total_unread = 0
+    
     for conv in conversations:
-        unread_count += Message.query.filter(
+        # Determine who the "other user" is
+        other_user = conv.user2 if conv.user1_id == user.id else conv.user1
+        
+        # Count unread messages in this conversation
+        unread_count = Message.query.filter(
             Message.conversation_id == conv.id,
             Message.sender_id != user.id,
             Message.is_read == False
         ).count()
+        
+        total_unread += unread_count
+        
+        # Get last message
+        last_message = Message.query.filter_by(conversation_id=conv.id)\
+            .order_by(Message.created_at.desc()).first()
+        
+        conversation_data.append({
+            'conversation': conv,
+            'other_user': other_user,
+            'unread_count': unread_count,
+            'last_message': last_message
+        })
     
     return render_template('messages_inbox.html', 
-        conversations=conversations,
-        unread_count=unread_count
+        conversation_data=conversation_data,
+        unread_count=total_unread
     )
 
 
