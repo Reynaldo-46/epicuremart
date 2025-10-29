@@ -3,7 +3,7 @@
 {% block content %}
 <div class="container">
     <div class="row justify-content-center">
-        <div class="col-md-7">
+        <div class="col-md-8">
             <div class="card shadow-lg border-0">
                 <div class="card-body p-5">
                     <div class="text-center mb-4">
@@ -14,41 +14,121 @@
                         <p class="text-muted">Join Epicuremart and start your journey</p>
                     </div>
                     
-                    <form method="POST">
-                        <div class="row">
-                            <div class="col-md-6 mb-4">
-                                <label class="form-label">Full Name *</label>
-                                <input type="text" name="full_name" class="form-control" 
-                                       placeholder="John Doe" required>
-                            </div>
-                            <div class="col-md-6 mb-4">
-                                <label class="form-label">Phone Number *</label>
-                                <input type="tel" name="phone" class="form-control" 
-                                       placeholder="+1 234 567 8900" required>
-                            </div>
-                        </div>
-                        
+                    <form method="POST" enctype="multipart/form-data" id="registrationForm">
+                        <!-- Step 1: Role Selection -->
                         <div class="mb-4">
-                            <label class="form-label">Email Address *</label>
-                            <input type="email" name="email" class="form-control" 
-                                   placeholder="you@example.com" required>
-                        </div>
-                        
-                        <div class="mb-4">
-                            <label class="form-label">Password *</label>
-                            <input type="password" name="password" class="form-control" 
-                                   placeholder="Minimum 8 characters" required minlength="8">
-                        </div>
-                        
-                        <div class="mb-4">
-                            <label class="form-label">I want to register as *</label>
+                            <label class="form-label fw-bold">I want to register as: *</label>
                             <select name="role" class="form-select" required id="roleSelect">
-                                <option value="customer">Customer - Browse and buy products</option>
+                                <option value="">-- Select Role --</option>
+                                <option value="customer">Buyer - Browse and buy products</option>
                                 <option value="seller">Seller - Sell my products (requires approval)</option>
-                                <option value="courier">Courier - Pick up from sellers (requires approval)</option>
-                                <option value="rider">Rider - Deliver to customers (requires approval)</option>
+                                <option value="rider">Rider / Courier - Deliver orders (requires approval)</option>
                             </select>
                             <small class="form-text text-muted" id="roleInfo"></small>
+                        </div>
+
+                        <!-- ID Upload Section (shown for Seller and Rider/Courier) -->
+                        <div class="mb-4 d-none" id="idUploadSection">
+                            <label class="form-label fw-bold">Valid ID Document *</label>
+                            <input type="file" name="id_document" class="form-control" id="idDocumentInput" accept="image/*,.pdf">
+                            <small class="form-text text-muted">Upload a valid government-issued ID (Required for Sellers and Riders/Couriers)</small>
+                        </div>
+                        
+                        <!-- Name Fields -->
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">First Name *</label>
+                                <input type="text" name="first_name" class="form-control" 
+                                       placeholder="Juan" required>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Middle Name</label>
+                                <input type="text" name="middle_name" class="form-control" 
+                                       placeholder="Dela">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Last Name *</label>
+                                <input type="text" name="last_name" class="form-control" 
+                                       placeholder="Cruz" required>
+                            </div>
+                        </div>
+
+                        <!-- Contact Information -->
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Email Address *</label>
+                                <input type="email" name="email" class="form-control" 
+                                       placeholder="you@example.com" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Phone Number *</label>
+                                <input type="tel" name="phone" class="form-control" 
+                                       placeholder="+63 912 345 6789" required>
+                            </div>
+                        </div>
+                        
+                        <!-- Address Fields - CALABARZON Dropdown -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Address (CALABARZON Region Only) *</label>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Region *</label>
+                                <input type="text" name="region" class="form-control" value="CALABARZON" readonly required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Province *</label>
+                                <select name="province" class="form-select" id="provinceSelect" required>
+                                    <option value="">-- Select Province --</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Municipality *</label>
+                                <select name="municipality" class="form-select" id="municipalitySelect" required disabled>
+                                    <option value="">-- Select Municipality --</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">City *</label>
+                                <select name="city" class="form-select" id="citySelect" required disabled>
+                                    <option value="">-- Select City --</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Barangay *</label>
+                            <select name="barangay" class="form-select" id="barangaySelect" required disabled>
+                                <option value="">-- Select Barangay --</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Password Fields -->
+                        <div class="mb-3">
+                            <label class="form-label">Password *</label>
+                            <div class="input-group">
+                                <input type="password" name="password" class="form-control" id="passwordField"
+                                       placeholder="Minimum 8 characters" required minlength="8">
+                                <button class="btn btn-outline-secondary" type="button" id="togglePassword">
+                                    <i class="fas fa-eye" id="togglePasswordIcon"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="form-label">Confirm Password *</label>
+                            <div class="input-group">
+                                <input type="password" name="confirm_password" class="form-control" id="confirmPasswordField"
+                                       placeholder="Re-enter password" required minlength="8">
+                                <button class="btn btn-outline-secondary" type="button" id="toggleConfirmPassword">
+                                    <i class="fas fa-eye" id="toggleConfirmPasswordIcon"></i>
+                                </button>
+                            </div>
+                            <small class="form-text text-danger d-none" id="passwordMismatch">Passwords do not match!</small>
                         </div>
                         
                         <button type="submit" class="btn btn-primary w-100 btn-lg mb-3">
@@ -69,18 +149,188 @@
 </div>
 
 <script>
-    document.getElementById('roleSelect').addEventListener('change', function() {
-        const roleInfo = document.getElementById('roleInfo');
-        const value = this.value;
-        
-        const messages = {
-            'customer': 'Start shopping immediately after email verification',
-            'seller': 'Requires admin approval. You\'ll receive an email when approved.',
-            'courier': 'Requires admin approval. Perfect for local pickup services.',
-            'rider': 'Requires admin approval. Join our delivery network today.'
-        };
-        
-        roleInfo.textContent = messages[value] || '';
+let addressData = null;
+
+// Fetch CALABARZON address data
+fetch('/api/calabarzon-addresses')
+    .then(response => response.json())
+    .then(data => {
+        addressData = data;
+        populateProvinces();
     });
+
+function populateProvinces() {
+    const provinceSelect = document.getElementById('provinceSelect');
+    provinceSelect.innerHTML = '<option value="">-- Select Province --</option>';
+    
+    if (addressData && addressData.provinces) {
+        Object.keys(addressData.provinces).forEach(province => {
+            const option = document.createElement('option');
+            option.value = province;
+            option.textContent = province;
+            provinceSelect.appendChild(option);
+        });
+    }
+}
+
+document.getElementById('provinceSelect').addEventListener('change', function() {
+    const province = this.value;
+    const municipalitySelect = document.getElementById('municipalitySelect');
+    const citySelect = document.getElementById('citySelect');
+    const barangaySelect = document.getElementById('barangaySelect');
+    
+    // Reset dependent dropdowns
+    municipalitySelect.innerHTML = '<option value="">-- Select Municipality --</option>';
+    citySelect.innerHTML = '<option value="">-- Select City --</option>';
+    barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
+    citySelect.disabled = true;
+    barangaySelect.disabled = true;
+    
+    if (province && addressData.provinces[province]) {
+        const municipalities = addressData.provinces[province].municipalities;
+        Object.keys(municipalities).forEach(municipality => {
+            const option = document.createElement('option');
+            option.value = municipality;
+            option.textContent = municipality;
+            municipalitySelect.appendChild(option);
+        });
+        municipalitySelect.disabled = false;
+    } else {
+        municipalitySelect.disabled = true;
+    }
+});
+
+document.getElementById('municipalitySelect').addEventListener('change', function() {
+    const province = document.getElementById('provinceSelect').value;
+    const municipality = this.value;
+    const citySelect = document.getElementById('citySelect');
+    const barangaySelect = document.getElementById('barangaySelect');
+    
+    // Reset dependent dropdowns
+    citySelect.innerHTML = '<option value="">-- Select City --</option>';
+    barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
+    barangaySelect.disabled = true;
+    
+    if (municipality && addressData.provinces[province].municipalities[municipality]) {
+        const municipalityData = addressData.provinces[province].municipalities[municipality];
+        
+        // Populate cities
+        if (municipalityData.cities) {
+            municipalityData.cities.forEach(city => {
+                const option = document.createElement('option');
+                option.value = city;
+                option.textContent = city;
+                citySelect.appendChild(option);
+            });
+        }
+        citySelect.disabled = false;
+    } else {
+        citySelect.disabled = true;
+    }
+});
+
+document.getElementById('citySelect').addEventListener('change', function() {
+    const province = document.getElementById('provinceSelect').value;
+    const municipality = document.getElementById('municipalitySelect').value;
+    const barangaySelect = document.getElementById('barangaySelect');
+    
+    // Reset barangay dropdown
+    barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
+    
+    if (municipality && addressData.provinces[province].municipalities[municipality]) {
+        const barangays = addressData.provinces[province].municipalities[municipality].barangays;
+        
+        if (barangays) {
+            barangays.forEach(barangay => {
+                const option = document.createElement('option');
+                option.value = barangay;
+                option.textContent = barangay;
+                barangaySelect.appendChild(option);
+            });
+        }
+        barangaySelect.disabled = false;
+    }
+});
+
+// Role selection handling
+document.getElementById('roleSelect').addEventListener('change', function() {
+    const roleInfo = document.getElementById('roleInfo');
+    const idUploadSection = document.getElementById('idUploadSection');
+    const idDocumentInput = document.getElementById('idDocumentInput');
+    const value = this.value;
+    
+    const messages = {
+        'customer': 'Start shopping immediately after email verification',
+        'seller': 'Requires admin approval and ID upload. You\'ll receive an email when approved.',
+        'rider': 'Requires admin approval and ID upload. Join our delivery network today.'
+    };
+    
+    roleInfo.textContent = messages[value] || '';
+    
+    // Show/hide ID upload section
+    if (value === 'seller' || value === 'rider') {
+        idUploadSection.classList.remove('d-none');
+        idDocumentInput.required = true;
+    } else {
+        idUploadSection.classList.add('d-none');
+        idDocumentInput.required = false;
+    }
+});
+
+// Password visibility toggles
+document.getElementById('togglePassword').addEventListener('click', function() {
+    const passwordField = document.getElementById('passwordField');
+    const icon = document.getElementById('togglePasswordIcon');
+    
+    if (passwordField.type === 'password') {
+        passwordField.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        passwordField.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+    }
+});
+
+document.getElementById('toggleConfirmPassword').addEventListener('click', function() {
+    const confirmPasswordField = document.getElementById('confirmPasswordField');
+    const icon = document.getElementById('toggleConfirmPasswordIcon');
+    
+    if (confirmPasswordField.type === 'password') {
+        confirmPasswordField.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        confirmPasswordField.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+    }
+});
+
+// Password match validation
+document.getElementById('confirmPasswordField').addEventListener('input', function() {
+    const password = document.getElementById('passwordField').value;
+    const confirmPassword = this.value;
+    const mismatchWarning = document.getElementById('passwordMismatch');
+    
+    if (confirmPassword && password !== confirmPassword) {
+        mismatchWarning.classList.remove('d-none');
+    } else {
+        mismatchWarning.classList.add('d-none');
+    }
+});
+
+// Form validation before submit
+document.getElementById('registrationForm').addEventListener('submit', function(e) {
+    const password = document.getElementById('passwordField').value;
+    const confirmPassword = document.getElementById('confirmPasswordField').value;
+    
+    if (password !== confirmPassword) {
+        e.preventDefault();
+        alert('Passwords do not match!');
+        return false;
+    }
+});
 </script>
 {% endblock %}

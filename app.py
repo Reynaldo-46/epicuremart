@@ -48,7 +48,11 @@ class User(db.Model):
     is_verified = db.Column(db.Boolean, default=False)
     is_approved = db.Column(db.Boolean, default=True)  # Admin approval for sellers/couriers/riders
     full_name = db.Column(db.String(100))
+    first_name = db.Column(db.String(50))
+    middle_name = db.Column(db.String(50))
+    last_name = db.Column(db.String(50))
     phone = db.Column(db.String(20))
+    id_document = db.Column(db.String(255))  # File path for uploaded ID
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -110,7 +114,11 @@ class Address(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     label = db.Column(db.String(50))  # Home, Work, etc.
     full_address = db.Column(db.Text, nullable=False)
+    region = db.Column(db.String(100))
+    province = db.Column(db.String(100))
+    municipality = db.Column(db.String(100))
     city = db.Column(db.String(100))
+    barangay = db.Column(db.String(100))
     postal_code = db.Column(db.String(20))
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -351,9 +359,24 @@ def register():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
         role = request.form.get('role', 'customer')
-        full_name = request.form.get('full_name')
+        first_name = request.form.get('first_name')
+        middle_name = request.form.get('middle_name', '')
+        last_name = request.form.get('last_name')
         phone = request.form.get('phone')
+        
+        # Address fields
+        region = request.form.get('region')
+        province = request.form.get('province')
+        municipality = request.form.get('municipality')
+        city = request.form.get('city')
+        barangay = request.form.get('barangay')
+        
+        # Validate password match
+        if password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return redirect(url_for('register'))
         
         if User.query.filter_by(email=email).first():
             flash('Email already registered.', 'danger')
@@ -362,17 +385,57 @@ def register():
         # Sellers, couriers, riders need admin approval
         is_approved = True if role == 'customer' else False
         
+        # Construct full name
+        full_name = f"{first_name} {middle_name} {last_name}".replace('  ', ' ').strip()
+        
         user = User(
             email=email,
             role=role,
             full_name=full_name,
+            first_name=first_name,
+            middle_name=middle_name,
+            last_name=last_name,
             phone=phone,
             is_approved=is_approved
         )
         user.set_password(password)
         
+        # Handle ID document upload for sellers, couriers, riders
+        if role in ['seller', 'courier', 'rider']:
+            if 'id_document' in request.files:
+                file = request.files['id_document']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"id_{role}_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.id_document = filename
+                else:
+                    flash('Valid ID document is required for this role.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('ID document upload is required for sellers, couriers, and riders.', 'danger')
+                return redirect(url_for('register'))
+        
         db.session.add(user)
         db.session.commit()
+        
+        # Create address entry if provided
+        if region and province and barangay:
+            full_address = f"{barangay}, {city or municipality}, {province}, {region}"
+            address = Address(
+                user_id=user.id,
+                label='Home',
+                full_address=full_address,
+                region=region,
+                province=province,
+                municipality=municipality,
+                city=city,
+                barangay=barangay,
+                is_default=True
+            )
+            db.session.add(address)
+            db.session.commit()
         
         # Send verification email
         verification_token = generate_qr_token(user.id, 'email_verify', expiry_hours=48)
@@ -1745,6 +1808,16 @@ def create_tables():
         
         db.session.commit()
         app.tables_created = True
+
+
+@app.route('/api/calabarzon-addresses')
+def get_calabarzon_addresses():
+    """API endpoint to get CALABARZON address data"""
+    import json
+    filepath = os.path.join(app.static_folder, 'calabarzon_addresses.json')
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    return jsonify(data)
 
 
 if __name__ == '__main__':
