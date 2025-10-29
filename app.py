@@ -1367,21 +1367,124 @@ def rider_history():
 @login_required
 @role_required('admin')
 def admin_dashboard():
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+    
+    # Get filter parameter
+    time_filter = request.args.get('filter', 'all')
+    
+    # Calculate date range based on filter
+    now = datetime.utcnow()
+    if time_filter == 'day':
+        start_date = now - timedelta(days=1)
+    elif time_filter == 'week':
+        start_date = now - timedelta(weeks=1)
+    elif time_filter == 'month':
+        start_date = now - timedelta(days=30)
+    elif time_filter == 'year':
+        start_date = now - timedelta(days=365)
+    else:
+        start_date = None
+    
+    # Base query for orders
+    order_query = Order.query
+    if start_date:
+        order_query = order_query.filter(Order.created_at >= start_date)
+    
     # Statistics
     total_users = User.query.count()
+    total_buyers = User.query.filter_by(role='customer').count()
     total_sellers = User.query.filter_by(role='seller').count()
+    total_riders = User.query.filter(User.role.in_(['rider', 'courier'])).count()
     total_orders = Order.query.count()
     total_products = Product.query.count()
     pending_approvals = User.query.filter_by(is_approved=False).count()
+    
+    # Revenue and commission tracking
+    total_revenue = db.session.query(func.sum(Order.total_amount))\
+        .filter(Order.status == 'DELIVERED')
+    if start_date:
+        total_revenue = total_revenue.filter(Order.created_at >= start_date)
+    total_revenue = total_revenue.scalar() or 0
+    
+    # Commission received (from delivered orders)
+    commission_received = db.session.query(func.sum(Order.commission_amount))\
+        .filter(Order.status == 'DELIVERED')
+    if start_date:
+        commission_received = commission_received.filter(Order.created_at >= start_date)
+    commission_received = commission_received.scalar() or 0
+    
+    # Commission pending (from non-delivered orders)
+    commission_pending = db.session.query(func.sum(Order.commission_amount))\
+        .filter(Order.status.in_(['PENDING_PAYMENT', 'READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER', 'OUT_FOR_DELIVERY']))
+    if start_date:
+        commission_pending = commission_pending.filter(Order.created_at >= start_date)
+    commission_pending = commission_pending.scalar() or 0
+    
+    # Revenue data for chart (last 7 days/weeks/months depending on filter)
+    revenue_chart_data = []
+    if time_filter == 'day' or time_filter == 'week':
+        # Daily data for last 7 days
+        for i in range(6, -1, -1):
+            date = now - timedelta(days=i)
+            day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            
+            daily_revenue = db.session.query(func.sum(Order.total_amount))\
+                .filter(Order.created_at >= day_start, Order.created_at < day_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': day_start.strftime('%b %d'),
+                'value': float(daily_revenue)
+            })
+    elif time_filter == 'month':
+        # Weekly data for last 4 weeks
+        for i in range(3, -1, -1):
+            week_start = now - timedelta(weeks=i+1)
+            week_end = now - timedelta(weeks=i)
+            
+            weekly_revenue = db.session.query(func.sum(Order.total_amount))\
+                .filter(Order.created_at >= week_start, Order.created_at < week_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': f'Week {i+1}',
+                'value': float(weekly_revenue)
+            })
+    else:
+        # Monthly data for last 12 months
+        for i in range(11, -1, -1):
+            month_start = (now - timedelta(days=30*i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if i == 0:
+                month_end = now
+            else:
+                month_end = (now - timedelta(days=30*(i-1))).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            monthly_revenue = db.session.query(func.sum(Order.total_amount))\
+                .filter(Order.created_at >= month_start, Order.created_at < month_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': month_start.strftime('%b %Y'),
+                'value': float(monthly_revenue)
+            })
     
     recent_logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(10).all()
     
     return render_template('admin_dashboard.html',
         total_users=total_users,
+        total_buyers=total_buyers,
         total_sellers=total_sellers,
+        total_riders=total_riders,
         total_orders=total_orders,
         total_products=total_products,
         pending_approvals=pending_approvals,
+        total_revenue=total_revenue,
+        commission_received=commission_received,
+        commission_pending=commission_pending,
+        revenue_chart_data=revenue_chart_data,
+        time_filter=time_filter,
         recent_logs=recent_logs
     )
 
@@ -1440,8 +1543,27 @@ def reject_user(user_id):
 @login_required
 @role_required('admin')
 def admin_users():
-    users = User.query.order_by(User.created_at.desc()).all()
-    return render_template('admin_users.html', users=users)
+    role_filter = request.args.get('role', 'all')
+    
+    query = User.query
+    if role_filter != 'all':
+        query = query.filter_by(role=role_filter)
+    
+    users = query.order_by(User.created_at.desc()).all()
+    
+    # Count by role
+    role_counts = {
+        'all': User.query.count(),
+        'customer': User.query.filter_by(role='customer').count(),
+        'seller': User.query.filter_by(role='seller').count(),
+        'rider': User.query.filter(User.role.in_(['rider', 'courier'])).count(),
+    }
+    
+    return render_template('admin_users.html', 
+        users=users, 
+        role_filter=role_filter,
+        role_counts=role_counts
+    )
 
 
 @app.route('/admin/categories', methods=['GET', 'POST'])

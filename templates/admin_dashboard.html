@@ -2,7 +2,29 @@
 
 {% block content %}
 <div class="container">
-    <h2 class="mb-4"><i class="fas fa-tachometer-alt"></i> Admin Dashboard</h2>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-tachometer-alt"></i> Admin Dashboard</h2>
+        
+        <!-- Time Filter Dropdown -->
+        <div class="btn-group">
+            <button type="button" class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="fas fa-filter"></i> 
+                {% if time_filter == 'day' %}Today
+                {% elif time_filter == 'week' %}This Week
+                {% elif time_filter == 'month' %}This Month
+                {% elif time_filter == 'year' %}This Year
+                {% else %}All Time{% endif %}
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="?filter=day">Today</a></li>
+                <li><a class="dropdown-item" href="?filter=week">This Week</a></li>
+                <li><a class="dropdown-item" href="?filter=month">This Month</a></li>
+                <li><a class="dropdown-item" href="?filter=year">This Year</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="?filter=all">All Time</a></li>
+            </ul>
+        </div>
+    </div>
 
     <!-- Statistics -->
     <div class="row mb-4">
@@ -13,6 +35,12 @@
             </div>
         </div>
         <div class="col-md-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">
+                <h3>{{ total_buyers }}</h3>
+                <p class="mb-0"><i class="fas fa-shopping-cart"></i> Buyers</p>
+            </div>
+        </div>
+        <div class="col-md-3">
             <div class="stat-card" style="background: linear-gradient(135deg, #10b981, #059669);">
                 <h3>{{ total_sellers }}</h3>
                 <p class="mb-0"><i class="fas fa-store"></i> Sellers</p>
@@ -20,14 +48,50 @@
         </div>
         <div class="col-md-3">
             <div class="stat-card" style="background: linear-gradient(135deg, #f59e0b, #d97706);">
-                <h3>{{ total_orders }}</h3>
-                <p class="mb-0"><i class="fas fa-shopping-bag"></i> Orders</p>
+                <h3>{{ total_riders }}</h3>
+                <p class="mb-0"><i class="fas fa-motorcycle"></i> Riders/Couriers</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Revenue & Commission Stats -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">
+                <h3>₱{{ "%.2f"|format(total_revenue) }}</h3>
+                <p class="mb-0"><i class="fas fa-chart-line"></i> Total Revenue</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #10b981, #059669);">
+                <h3>₱{{ "%.2f"|format(commission_received) }}</h3>
+                <p class="mb-0"><i class="fas fa-check-circle"></i> Commission Received</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #f59e0b, #d97706);">
+                <h3>₱{{ "%.2f"|format(commission_pending) }}</h3>
+                <p class="mb-0"><i class="fas fa-clock"></i> Commission Pending</p>
             </div>
         </div>
         <div class="col-md-3">
             <div class="stat-card" style="background: linear-gradient(135deg, #ef4444, #dc2626);">
                 <h3>{{ pending_approvals }}</h3>
-                <p class="mb-0"><i class="fas fa-clock"></i> Pending Approvals</p>
+                <p class="mb-0"><i class="fas fa-user-clock"></i> Pending Approvals</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Revenue Chart -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-chart-area"></i> Revenue Analytics</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="revenueChart" height="80"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -96,4 +160,55 @@
         </div>
     </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<script>
+// Revenue Chart
+const revenueData = {{ revenue_chart_data | tojson }};
+const labels = revenueData.map(d => d.label);
+const values = revenueData.map(d => d.value);
+
+const ctx = document.getElementById('revenueChart').getContext('2d');
+new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'Revenue (₱)',
+            data: values,
+            borderColor: 'rgb(99, 102, 241)',
+            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+            tension: 0.4,
+            fill: true
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+            legend: {
+                display: true,
+                position: 'top'
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return '₱' + context.parsed.y.toFixed(2);
+                    }
+                }
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return '₱' + value.toFixed(0);
+                    }
+                }
+            }
+        }
+    }
+});
+</script>
 {% endblock %}
