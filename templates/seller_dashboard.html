@@ -5,24 +5,40 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>Seller Dashboard - {{ shop.name }}</h2>
         
-        <!-- Time Filter Dropdown -->
-        <div class="btn-group">
-            <button type="button" class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
-                <i class="fas fa-filter"></i> 
-                {% if time_filter == 'day' %}Today
-                {% elif time_filter == 'week' %}This Week
-                {% elif time_filter == 'month' %}This Month
-                {% elif time_filter == 'year' %}This Year
-                {% else %}All Time{% endif %}
-            </button>
-            <ul class="dropdown-menu">
-                <li><a class="dropdown-item" href="?filter=day">Today</a></li>
-                <li><a class="dropdown-item" href="?filter=week">This Week</a></li>
-                <li><a class="dropdown-item" href="?filter=month">This Month</a></li>
-                <li><a class="dropdown-item" href="?filter=year">This Year</a></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><a class="dropdown-item" href="?filter=all">All Time</a></li>
-            </ul>
+        <!-- Time Filter Dropdown and Custom Date Range -->
+        <div class="d-flex gap-2">
+            <!-- Custom Date Range Form -->
+            <form method="GET" class="d-flex gap-2 align-items-center">
+                <input type="date" name="start_date" class="form-control form-control-sm" 
+                       value="{{ start_date if start_date else '' }}" 
+                       placeholder="Start Date">
+                <input type="date" name="end_date" class="form-control form-control-sm" 
+                       value="{{ end_date if end_date else '' }}" 
+                       placeholder="End Date">
+                <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="fas fa-search"></i> Filter
+                </button>
+            </form>
+            
+            <div class="btn-group">
+                <button type="button" class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
+                    <i class="fas fa-filter"></i> 
+                    {% if time_filter == 'day' %}Today
+                    {% elif time_filter == 'week' %}This Week
+                    {% elif time_filter == 'month' %}This Month
+                    {% elif time_filter == 'year' %}This Year
+                    {% elif time_filter == 'custom' %}Custom Range
+                    {% else %}All Time{% endif %}
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="?filter=day">Today</a></li>
+                    <li><a class="dropdown-item" href="?filter=week">This Week</a></li>
+                    <li><a class="dropdown-item" href="?filter=month">This Month</a></li>
+                    <li><a class="dropdown-item" href="?filter=year">This Year</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="?filter=all">All Time</a></li>
+                </ul>
+            </div>
         </div>
     </div>
     

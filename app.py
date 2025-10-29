@@ -712,6 +712,44 @@ def checkout():
     if request.method == 'POST':
         address_id = request.form.get('address_id')
         
+        if not address_id:
+            flash('Please select a delivery address.', 'warning')
+            return redirect(url_for('checkout'))
+        
+        # Get delivery address to calculate delivery fee
+        delivery_address = Address.query.get(address_id)
+        if not delivery_address or delivery_address.user_id != session['user_id']:
+            flash('Invalid delivery address.', 'danger')
+            return redirect(url_for('checkout'))
+        
+        # Validate stock availability BEFORE creating orders
+        for product_id, quantity in cart.items():
+            product = Product.query.get(int(product_id))
+            if not product:
+                flash(f'Product not found.', 'danger')
+                return redirect(url_for('view_cart'))
+            
+            if product.stock < quantity:
+                flash(f'Insufficient stock for {product.name}. Only {product.stock} available.', 'danger')
+                return redirect(url_for('view_cart'))
+            
+            if product.stock == 0:
+                flash(f'{product.name} is out of stock.', 'danger')
+                return redirect(url_for('view_cart'))
+        
+        # Calculate delivery fee based on address
+        delivery_fee_obj = DeliveryFee.query.filter_by(
+            city=delivery_address.city
+        ).first()
+        
+        if not delivery_fee_obj and delivery_address.province:
+            # Try to find by province if city not found
+            delivery_fee_obj = DeliveryFee.query.filter_by(
+                province=delivery_address.province
+            ).first()
+        
+        delivery_fee = float(delivery_fee_obj.fee) if delivery_fee_obj else 50.00  # Default 50 pesos
+        
         # Group items by shop
         shop_orders = {}
         for product_id, quantity in cart.items():
@@ -723,17 +761,23 @@ def checkout():
         
         # Create order for each shop
         for shop_id, items in shop_orders.items():
-            total = sum([float(p.price) * q for p, q in items])
+            subtotal = sum([float(p.price) * q for p, q in items])
             
-            commission = total * 0.05
-            seller_amount = total - commission
+            # Calculate total with delivery fee
+            total_amount = subtotal + delivery_fee
+            
+            # Calculate commission on subtotal (not including delivery fee)
+            commission = subtotal * 0.05
+            seller_amount = subtotal - commission
             
             order = Order(
                 order_number=generate_order_number(),
                 customer_id=session['user_id'],
                 shop_id=shop_id,
                 delivery_address_id=address_id,
-                total_amount=total,
+                subtotal=subtotal,
+                delivery_fee=delivery_fee,
+                total_amount=total_amount,
                 commission_rate=5.00,
                 commission_amount=commission,
                 seller_amount=seller_amount,
@@ -742,6 +786,7 @@ def checkout():
             db.session.add(order)
             db.session.flush()
             
+            # Create order items and DEDUCT STOCK
             for product, quantity in items:
                 order_item = OrderItem(
                     order_id=order.id,
@@ -750,6 +795,12 @@ def checkout():
                     price=product.price
                 )
                 db.session.add(order_item)
+                
+                # DEDUCT STOCK IMMEDIATELY upon order creation
+                product.stock -= quantity
+                
+                log_action('STOCK_DEDUCTED', 'Product', product.id, 
+                          f'Deducted {quantity} units for order {order.order_number}')
             
             log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
         
@@ -767,7 +818,43 @@ def checkout():
         flash('Order(s) placed successfully!', 'success')
         return redirect(url_for('customer_orders'))
     
-    return render_template('checkout.html', addresses=addresses)
+    # Calculate cart preview with delivery fee estimate
+    cart_items = []
+    subtotal = 0
+    for product_id, quantity in cart.items():
+        product = Product.query.get(int(product_id))
+        if product:
+            item_total = float(product.price) * quantity
+            subtotal += item_total
+            cart_items.append({
+                'product': product,
+                'quantity': quantity,
+                'subtotal': item_total
+            })
+    
+    # Get delivery fee estimate if user has a default address
+    default_address = Address.query.filter_by(
+        user_id=session['user_id'], 
+        is_default=True
+    ).first()
+    
+    estimated_delivery_fee = 50.00  # Default
+    if default_address:
+        delivery_fee_obj = DeliveryFee.query.filter_by(
+            city=default_address.city
+        ).first()
+        if delivery_fee_obj:
+            estimated_delivery_fee = float(delivery_fee_obj.fee)
+    
+    estimated_total = subtotal + estimated_delivery_fee
+    
+    return render_template('checkout.html', 
+        addresses=addresses,
+        cart_items=cart_items,
+        subtotal=subtotal,
+        estimated_delivery_fee=estimated_delivery_fee,
+        estimated_total=estimated_total
+    )
 
 
 @app.route('/customer/orders')
@@ -922,21 +1009,38 @@ def seller_dashboard():
     if not user.shop:
         return redirect(url_for('create_shop'))
     
-    # Get filter parameter
+    # Get filter parameters
     time_filter = request.args.get('filter', 'all')
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
     
-    # Calculate date range based on filter
+    # Parse custom date range if provided
     now = datetime.utcnow()
-    if time_filter == 'day':
-        start_date = now - timedelta(days=1)
-    elif time_filter == 'week':
-        start_date = now - timedelta(weeks=1)
-    elif time_filter == 'month':
-        start_date = now - timedelta(days=30)
-    elif time_filter == 'year':
-        start_date = now - timedelta(days=365)
-    else:
-        start_date = None
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            time_filter = 'custom'
+        except ValueError:
+            flash('Invalid date format. Please use YYYY-MM-DD.', 'warning')
+            start_date = None
+            end_date = None
+    
+    # Calculate date range based on predefined filter if no custom range
+    if not start_date and not end_date:
+        if time_filter == 'day':
+            start_date = now - timedelta(days=1)
+        elif time_filter == 'week':
+            start_date = now - timedelta(weeks=1)
+        elif time_filter == 'month':
+            start_date = now - timedelta(days=30)
+        elif time_filter == 'year':
+            start_date = now - timedelta(days=365)
+        else:
+            start_date = None
     
     # Statistics
     total_products = Product.query.filter_by(shop_id=user.shop.id).count()
@@ -955,6 +1059,8 @@ def seller_dashboard():
         .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
     if start_date:
         revenue_query = revenue_query.filter(Order.created_at >= start_date)
+    if end_date:
+        revenue_query = revenue_query.filter(Order.created_at <= end_date)
     total_revenue = revenue_query.scalar() or 0
     
     # Total sales (before commission)
@@ -962,6 +1068,8 @@ def seller_dashboard():
         .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
     if start_date:
         sales_query = sales_query.filter(Order.created_at >= start_date)
+    if end_date:
+        sales_query = sales_query.filter(Order.created_at <= end_date)
     total_sales = sales_query.scalar() or 0
     
     # Average order value
@@ -969,6 +1077,8 @@ def seller_dashboard():
         .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
     if start_date:
         avg_order_query = avg_order_query.filter(Order.created_at >= start_date)
+    if end_date:
+        avg_order_query = avg_order_query.filter(Order.created_at <= end_date)
     avg_order_value = avg_order_query.scalar() or 0
     
     # Revenue data for chart
@@ -1049,6 +1159,8 @@ def seller_dashboard():
         revenue_chart_data=revenue_chart_data,
         top_products=top_products,
         time_filter=time_filter,
+        start_date=start_date_str,
+        end_date=end_date_str,
         recent_orders=recent_orders
     )
 
@@ -1479,26 +1591,45 @@ def admin_dashboard():
     from sqlalchemy import func
     from datetime import datetime, timedelta
     
-    # Get filter parameter
+    # Get filter parameters
     time_filter = request.args.get('filter', 'all')
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
     
-    # Calculate date range based on filter
+    # Parse custom date range if provided
     now = datetime.utcnow()
-    if time_filter == 'day':
-        start_date = now - timedelta(days=1)
-    elif time_filter == 'week':
-        start_date = now - timedelta(weeks=1)
-    elif time_filter == 'month':
-        start_date = now - timedelta(days=30)
-    elif time_filter == 'year':
-        start_date = now - timedelta(days=365)
-    else:
-        start_date = None
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            time_filter = 'custom'
+        except ValueError:
+            flash('Invalid date format. Please use YYYY-MM-DD.', 'warning')
+            start_date = None
+            end_date = None
+    
+    # Calculate date range based on predefined filter if no custom range
+    if not start_date and not end_date:
+        if time_filter == 'day':
+            start_date = now - timedelta(days=1)
+        elif time_filter == 'week':
+            start_date = now - timedelta(weeks=1)
+        elif time_filter == 'month':
+            start_date = now - timedelta(days=30)
+        elif time_filter == 'year':
+            start_date = now - timedelta(days=365)
+        else:
+            start_date = None
     
     # Base query for orders
     order_query = Order.query
     if start_date:
         order_query = order_query.filter(Order.created_at >= start_date)
+    if end_date:
+        order_query = order_query.filter(Order.created_at <= end_date)
     
     # Statistics
     total_users = User.query.count()
@@ -1514,6 +1645,8 @@ def admin_dashboard():
         .filter(Order.status == 'DELIVERED')
     if start_date:
         total_revenue = total_revenue.filter(Order.created_at >= start_date)
+    if end_date:
+        total_revenue = total_revenue.filter(Order.created_at <= end_date)
     total_revenue = total_revenue.scalar() or 0
     
     # Commission received (from delivered orders)
@@ -1521,6 +1654,8 @@ def admin_dashboard():
         .filter(Order.status == 'DELIVERED')
     if start_date:
         commission_received = commission_received.filter(Order.created_at >= start_date)
+    if end_date:
+        commission_received = commission_received.filter(Order.created_at <= end_date)
     commission_received = commission_received.scalar() or 0
     
     # Commission pending (from non-delivered orders)
@@ -1528,6 +1663,8 @@ def admin_dashboard():
         .filter(Order.status.in_(['PENDING_PAYMENT', 'READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER', 'OUT_FOR_DELIVERY']))
     if start_date:
         commission_pending = commission_pending.filter(Order.created_at >= start_date)
+    if end_date:
+        commission_pending = commission_pending.filter(Order.created_at <= end_date)
     commission_pending = commission_pending.scalar() or 0
     
     # Revenue data for chart (last 7 days/weeks/months depending on filter)
@@ -1594,6 +1731,8 @@ def admin_dashboard():
         commission_pending=commission_pending,
         revenue_chart_data=revenue_chart_data,
         time_filter=time_filter,
+        start_date=start_date_str,
+        end_date=end_date_str,
         recent_logs=recent_logs
     )
 
