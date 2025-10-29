@@ -212,15 +212,18 @@ class AuditLog(db.Model):
 class Conversation(db.Model):
     __tablename__ = 'conversations'
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False)
+    user1_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider'), nullable=False)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    customer = db.relationship('User', foreign_keys=[customer_id])
-    seller = db.relationship('User', foreign_keys=[seller_id])
-    shop = db.relationship('Shop')
+    user1 = db.relationship('User', foreign_keys=[user1_id])
+    user2 = db.relationship('User', foreign_keys=[user2_id])
+    shop = db.relationship('Shop', foreign_keys=[shop_id])
+    order = db.relationship('Order', foreign_keys=[order_id])
     messages = db.relationship('Message', backref='conversation', cascade='all, delete-orphan', order_by='Message.created_at')
 
 
@@ -1527,15 +1530,13 @@ def admin_analytics():
 def messages_inbox():
     user = User.query.get(session['user_id'])
     
-    if user.role == 'customer':
-        conversations = Conversation.query.filter_by(customer_id=user.id)\
-            .order_by(Conversation.last_message_at.desc()).all()
-    elif user.role == 'seller':
-        conversations = Conversation.query.filter_by(seller_id=user.id)\
-            .order_by(Conversation.last_message_at.desc()).all()
-    else:
-        flash('Only customers and sellers can access messages.', 'warning')
-        return redirect(url_for('index'))
+    # Get all conversations where user is either user1 or user2
+    conversations = Conversation.query.filter(
+        db.or_(
+            Conversation.user1_id == user.id,
+            Conversation.user2_id == user.id
+        )
+    ).order_by(Conversation.last_message_at.desc()).all()
     
     # Count unread messages
     unread_count = 0
@@ -1559,7 +1560,7 @@ def view_conversation(conversation_id):
     user = User.query.get(session['user_id'])
     
     # Check authorization
-    if user.id not in [conversation.customer_id, conversation.seller_id]:
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('messages_inbox'))
     
@@ -1587,7 +1588,7 @@ def send_message(conversation_id):
     user = User.query.get(session['user_id'])
     
     # Check authorization
-    if user.id not in [conversation.customer_id, conversation.seller_id]:
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
     message_text = request.form.get('message_text', '').strip()
@@ -1627,10 +1628,13 @@ def start_conversation(shop_id):
     shop = Shop.query.get_or_404(shop_id)
     
     # Check if conversation already exists
-    existing = Conversation.query.filter_by(
-        customer_id=session['user_id'],
-        seller_id=shop.seller_id,
-        shop_id=shop_id
+    existing = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == session['user_id'], Conversation.user2_id == shop.seller_id),
+            db.and_(Conversation.user1_id == shop.seller_id, Conversation.user2_id == session['user_id'])
+        ),
+        Conversation.conversation_type == 'buyer_seller',
+        Conversation.shop_id == shop_id
     ).first()
     
     if existing:
@@ -1638,15 +1642,73 @@ def start_conversation(shop_id):
     
     # Create new conversation
     conversation = Conversation(
-        customer_id=session['user_id'],
-        seller_id=shop.seller_id,
-        shop_id=shop_id
+        user1_id=session['user_id'],
+        user2_id=shop.seller_id,
+        shop_id=shop_id,
+        conversation_type='buyer_seller'
     )
     
     db.session.add(conversation)
     db.session.commit()
     
     log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With shop {shop.name}')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
+@app.route('/messages/start-with-rider/<int:order_id>', methods=['POST'])
+@login_required
+def start_conversation_with_rider(order_id):
+    """Start conversation between buyer/seller and rider for an order"""
+    order = Order.query.get_or_404(order_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify user is buyer or seller of this order
+    if user.role == 'customer' and order.customer_id != user.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('index'))
+    
+    if user.role == 'seller' and order.shop.seller_id != user.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('index'))
+    
+    if not order.rider_id:
+        flash('No rider assigned to this order yet.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id) if user.role == 'customer' else url_for('seller_order_detail', order_id=order_id))
+    
+    # Determine conversation type
+    if user.role == 'customer':
+        conv_type = 'buyer_rider'
+        other_user_id = order.rider_id
+    else:  # seller
+        conv_type = 'seller_rider'
+        other_user_id = order.rider_id
+    
+    # Check if conversation already exists
+    existing = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == user.id, Conversation.user2_id == other_user_id),
+            db.and_(Conversation.user1_id == other_user_id, Conversation.user2_id == user.id)
+        ),
+        Conversation.conversation_type == conv_type,
+        Conversation.order_id == order_id
+    ).first()
+    
+    if existing:
+        return redirect(url_for('view_conversation', conversation_id=existing.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=user.id,
+        user2_id=other_user_id,
+        order_id=order_id,
+        conversation_type=conv_type
+    )
+    
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With rider for order {order.order_number}')
     
     return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
@@ -1658,7 +1720,7 @@ def check_new_messages(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    if user.id not in [conversation.customer_id, conversation.seller_id]:
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         return jsonify({'success': False}), 403
     
     last_message_id = request.args.get('last_id', 0, type=int)
