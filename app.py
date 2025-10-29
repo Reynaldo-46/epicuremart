@@ -914,10 +914,29 @@ def product_detail(product_id):
 @login_required
 @role_required('seller')
 def seller_dashboard():
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+    
     user = User.query.get(session['user_id'])
     
     if not user.shop:
         return redirect(url_for('create_shop'))
+    
+    # Get filter parameter
+    time_filter = request.args.get('filter', 'all')
+    
+    # Calculate date range based on filter
+    now = datetime.utcnow()
+    if time_filter == 'day':
+        start_date = now - timedelta(days=1)
+    elif time_filter == 'week':
+        start_date = now - timedelta(weeks=1)
+    elif time_filter == 'month':
+        start_date = now - timedelta(days=30)
+    elif time_filter == 'year':
+        start_date = now - timedelta(days=365)
+    else:
+        start_date = None
     
     # Statistics
     total_products = Product.query.filter_by(shop_id=user.shop.id).count()
@@ -931,6 +950,90 @@ def seller_dashboard():
         status='READY_FOR_PICKUP'
     ).count()
     
+    # Revenue calculations
+    revenue_query = db.session.query(func.sum(Order.seller_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
+    if start_date:
+        revenue_query = revenue_query.filter(Order.created_at >= start_date)
+    total_revenue = revenue_query.scalar() or 0
+    
+    # Total sales (before commission)
+    sales_query = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
+    if start_date:
+        sales_query = sales_query.filter(Order.created_at >= start_date)
+    total_sales = sales_query.scalar() or 0
+    
+    # Average order value
+    avg_order_query = db.session.query(func.avg(Order.total_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
+    if start_date:
+        avg_order_query = avg_order_query.filter(Order.created_at >= start_date)
+    avg_order_value = avg_order_query.scalar() or 0
+    
+    # Revenue data for chart
+    revenue_chart_data = []
+    if time_filter == 'day' or time_filter == 'week':
+        # Daily data for last 7 days
+        for i in range(6, -1, -1):
+            date = now - timedelta(days=i)
+            day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            
+            daily_revenue = db.session.query(func.sum(Order.seller_amount))\
+                .filter(Order.shop_id == user.shop.id,
+                        Order.created_at >= day_start, 
+                        Order.created_at < day_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': day_start.strftime('%b %d'),
+                'value': float(daily_revenue)
+            })
+    elif time_filter == 'month':
+        # Weekly data for last 4 weeks
+        for i in range(3, -1, -1):
+            week_start = now - timedelta(weeks=i+1)
+            week_end = now - timedelta(weeks=i)
+            
+            weekly_revenue = db.session.query(func.sum(Order.seller_amount))\
+                .filter(Order.shop_id == user.shop.id,
+                        Order.created_at >= week_start, 
+                        Order.created_at < week_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': f'Week {i+1}',
+                'value': float(weekly_revenue)
+            })
+    else:
+        # Monthly data for last 12 months
+        for i in range(11, -1, -1):
+            month_start = (now - timedelta(days=30*i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if i == 0:
+                month_end = now
+            else:
+                month_end = (now - timedelta(days=30*(i-1))).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            monthly_revenue = db.session.query(func.sum(Order.seller_amount))\
+                .filter(Order.shop_id == user.shop.id,
+                        Order.created_at >= month_start, 
+                        Order.created_at < month_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': month_start.strftime('%b %Y'),
+                'value': float(monthly_revenue)
+            })
+    
+    # Top selling products
+    top_products = db.session.query(
+        Product.name, 
+        func.sum(OrderItem.quantity).label('total_sold')
+    ).join(OrderItem).join(Order)\
+        .filter(Product.shop_id == user.shop.id, Order.status == 'DELIVERED')\
+        .group_by(Product.id).order_by(func.sum(OrderItem.quantity).desc()).limit(5).all()
+    
     recent_orders = Order.query.filter_by(shop_id=user.shop.id)\
         .order_by(Order.created_at.desc()).limit(5).all()
     
@@ -940,6 +1043,12 @@ def seller_dashboard():
         total_orders=total_orders,
         pending_orders=pending_orders,
         ready_orders=ready_orders,
+        total_revenue=total_revenue,
+        total_sales=total_sales,
+        avg_order_value=avg_order_value,
+        revenue_chart_data=revenue_chart_data,
+        top_products=top_products,
+        time_filter=time_filter,
         recent_orders=recent_orders
     )
 
