@@ -17,6 +17,7 @@
                             <th>Amount</th>
                             <th>Status</th>
                             <th>Delivered On</th>
+                            <th>Proof</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -39,6 +40,17 @@
                                     {{ order.updated_at.strftime('%Y-%m-%d %H:%M') }}
                                 {% else %}
                                     In progress
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if order.proof_of_delivery %}
+                                <button class="btn btn-sm btn-outline-primary" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#proofModal{{ order.id }}">
+                                    <i class="fas fa-image"></i> View
+                                </button>
+                                {% else %}
+                                <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
                         </tr>
@@ -86,4 +98,29 @@
         <i class="fas fa-arrow-left"></i> Back to Dashboard
     </a>
 </div>
+
+<!-- Proof of Delivery Modals -->
+{% for order in orders %}
+{% if order.proof_of_delivery %}
+<div class="modal fade" id="proofModal{{ order.id }}" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Proof of Delivery - Order {{ order.order_number }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img src="{{ url_for('static', filename='uploads/' + order.proof_of_delivery) }}" 
+                     class="img-fluid" 
+                     alt="Proof of Delivery">
+                <div class="mt-3">
+                    <p class="mb-1"><strong>Delivered to:</strong> {{ order.customer.full_name }}</p>
+                    <p class="mb-0"><strong>Date:</strong> {{ order.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endfor %}
 {% endblock %}

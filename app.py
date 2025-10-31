@@ -151,6 +151,9 @@ class Order(db.Model):
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
     delivery_token = db.Column(db.String(500))  # JWT for customer delivery
     
+    # Proof of Delivery
+    proof_of_delivery = db.Column(db.String(255))  # Photo uploaded by rider as proof
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -1697,32 +1700,55 @@ def rider_confirm_delivery(order_id):
         return redirect(url_for('rider_dashboard'))
     
     if request.method == 'POST':
-        # Customer should scan QR to confirm
-        token = request.form.get('token')
-        
-        payload = verify_qr_token(token)
-        if not payload or payload.get('type') != 'delivery' or payload['order_id'] != order_id:
-            flash('Invalid delivery confirmation.', 'danger')
+        # Check if proof of delivery photo is uploaded
+        if 'proof_of_delivery' not in request.files:
+            flash('Please upload proof of delivery photo.', 'warning')
             return redirect(url_for('rider_confirm_delivery', order_id=order_id))
         
-        order.status = 'DELIVERED'
-        db.session.commit()
+        file = request.files['proof_of_delivery']
         
-        log_action('ORDER_DELIVERED', 'Order', order.id, f'Order {order.order_number} delivered')
+        if file.filename == '':
+            flash('Please upload proof of delivery photo.', 'warning')
+            return redirect(url_for('rider_confirm_delivery', order_id=order_id))
         
-        # Notify customer and seller
-        send_email(
-            order.customer.email,
-            'Order Delivered',
-            f'Your order {order.order_number} has been delivered successfully!'
-        )
-        
-        flash(f'Order {order.order_number} delivered successfully!', 'success')
-        return redirect(url_for('rider_dashboard'))
+        if file and allowed_file(file.filename):
+            # Validate file size (max 10MB for photos)
+            file.seek(0, 2)
+            file_size = file.tell()
+            file.seek(0)
+            
+            max_size = 10 * 1024 * 1024  # 10MB
+            if file_size > max_size:
+                flash('File size must be less than 10MB.', 'danger')
+                return redirect(url_for('rider_confirm_delivery', order_id=order_id))
+            
+            # Save proof of delivery photo
+            filename = secure_filename(file.filename)
+            unique_filename = f"proof_delivery_{order.order_number}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            file.save(filepath)
+            
+            order.proof_of_delivery = unique_filename
+            order.status = 'DELIVERED'
+            db.session.commit()
+            
+            log_action('ORDER_DELIVERED', 'Order', order.id, f'Order {order.order_number} delivered with proof')
+            
+            # Notify customer and seller
+            send_email(
+                order.customer.email,
+                'Order Delivered',
+                f'Your order {order.order_number} has been delivered successfully!'
+            )
+            
+            flash(f'Order {order.order_number} delivered successfully!', 'success')
+            return redirect(url_for('rider_dashboard'))
+        else:
+            flash('Invalid file type. Please upload an image (PNG, JPG, JPEG, GIF, WEBP).', 'danger')
+            return redirect(url_for('rider_confirm_delivery', order_id=order_id))
     
-    # Show QR for customer to scan
-    qr_data = generate_qr_code(order.delivery_token)
-    return render_template('rider_delivery_confirm.html', order=order, qr_data=qr_data)
+    # Show delivery confirmation form with photo upload
+    return render_template('rider_delivery_confirm.html', order=order)
 
 
 @app.route('/rider/history')
