@@ -56,6 +56,8 @@ class User(db.Model):
     phone = db.Column(db.String(20))
     id_document = db.Column(db.String(255))  # File path for uploaded ID
     profile_picture = db.Column(db.String(255))  # Profile picture/business icon
+    is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
+    last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -496,6 +498,7 @@ def login():
             session['user_id'] = user.id
             session['role'] = user.role
             session['profile_picture'] = user.profile_picture  # Add profile picture to session
+            session['is_support_agent'] = user.is_support_agent if hasattr(user, 'is_support_agent') else False  # Add support agent status
             
             log_action('USER_LOGIN', 'User', user.id)
             
@@ -2315,6 +2318,223 @@ def check_new_messages(conversation_id):
         'success': True,
         'messages': messages_data
     })
+
+
+# ==================== SUPPORT CHAT ROUTES ====================
+
+@app.route('/support/start', methods=['GET', 'POST'])
+@login_required
+def start_support_chat():
+    """User initiates a support chat"""
+    user = User.query.get(session['user_id'])
+    
+    # Check if user already has an active support conversation
+    existing_conv = Conversation.query.filter(
+        Conversation.conversation_type == 'user_support',
+        db.or_(Conversation.user1_id == user.id, Conversation.user2_id == user.id)
+    ).first()
+    
+    if existing_conv:
+        return redirect(url_for('support_conversation', conversation_id=existing_conv.id))
+    
+    # Find an available support agent
+    support_agent = User.query.filter_by(is_support_agent=True).first()
+    
+    if not support_agent:
+        flash('No support agents are currently available. Please try again later.', 'warning')
+        return redirect(request.referrer or url_for('customer_dashboard'))
+    
+    # Create new support conversation
+    conversation = Conversation(
+        user1_id=user.id,
+        user2_id=support_agent.id,
+        conversation_type='user_support'
+    )
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('SUPPORT_CHAT_STARTED', 'Conversation', conversation.id, f'User {user.full_name} started support chat')
+    
+    flash('Connected to support. How can we help you?', 'success')
+    return redirect(url_for('support_conversation', conversation_id=conversation.id))
+
+
+@app.route('/support/conversation/<int:conversation_id>')
+@login_required
+def support_conversation(conversation_id):
+    """View support conversation (for both users and agents)"""
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify access
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
+        flash('You do not have access to this conversation.', 'danger')
+        return redirect(url_for('customer_dashboard'))
+    
+    # Mark messages as read
+    Message.query.filter(
+        Message.conversation_id == conversation_id,
+        Message.sender_id != user.id,
+        Message.is_read == False
+    ).update({'is_read': True})
+    db.session.commit()
+    
+    # Get other user
+    other_user = conversation.user1 if conversation.user2_id == user.id else conversation.user2
+    
+    # Update last activity for support agents
+    if user.is_support_agent:
+        user.last_activity = datetime.utcnow()
+        db.session.commit()
+    
+    return render_template('support_conversation.html',
+        conversation=conversation,
+        other_user=other_user,
+        messages=conversation.messages
+    )
+
+
+@app.route('/support/send-message/<int:conversation_id>', methods=['POST'])
+@login_required
+def send_support_message(conversation_id):
+    """Send a message in support conversation"""
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify access
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
+        return jsonify({'success': False, 'error': 'Access denied'}), 403
+    
+    message_text = request.form.get('message_text', '').strip()
+    
+    if not message_text:
+        return jsonify({'success': False, 'error': 'Message cannot be empty'}), 400
+    
+    # Create message
+    message = Message(
+        conversation_id=conversation_id,
+        sender_id=user.id,
+        message_text=message_text
+    )
+    db.session.add(message)
+    
+    # Update conversation timestamp
+    conversation.last_message_at = datetime.utcnow()
+    db.session.commit()
+    
+    # Update last activity for support agents
+    if user.is_support_agent:
+        user.last_activity = datetime.utcnow()
+        db.session.commit()
+    
+    return jsonify({'success': True, 'message_id': message.id})
+
+
+@app.route('/support/dashboard')
+@login_required
+def support_dashboard():
+    """Support agent dashboard showing all support conversations"""
+    user = User.query.get(session['user_id'])
+    
+    if not user.is_support_agent and user.role != 'admin':
+        flash('You do not have access to the support dashboard.', 'danger')
+        return redirect(url_for('customer_dashboard'))
+    
+    # Get all support conversations
+    conversations = Conversation.query.filter_by(
+        conversation_type='user_support'
+    ).order_by(Conversation.last_message_at.desc()).all()
+    
+    # Get unread counts for each conversation
+    conv_data = []
+    for conv in conversations:
+        user_info = conv.user1 if conv.user1_id != user.id else conv.user2
+        if conv.user2.is_support_agent or conv.user2.role == 'admin':
+            user_info = conv.user1
+        
+        unread_count = Message.query.filter(
+            Message.conversation_id == conv.id,
+            Message.sender_id != user.id,
+            Message.is_read == False
+        ).count()
+        
+        last_msg = conv.messages[-1] if conv.messages else None
+        
+        conv_data.append({
+            'conversation': conv,
+            'user': user_info,
+            'unread_count': unread_count,
+            'last_message': last_msg
+        })
+    
+    # Update last activity
+    user.last_activity = datetime.utcnow()
+    db.session.commit()
+    
+    # Get all support agents for status display
+    support_agents = User.query.filter_by(is_support_agent=True).all()
+    
+    return render_template('support_dashboard.html',
+        conversations=conv_data,
+        support_agents=support_agents
+    )
+
+
+@app.route('/support/mark-read/<int:conversation_id>', methods=['POST'])
+@login_required
+def mark_support_read(conversation_id):
+    """Mark all messages in conversation as read"""
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify access
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
+        return jsonify({'success': False}), 403
+    
+    Message.query.filter(
+        Message.conversation_id == conversation_id,
+        Message.sender_id != user.id,
+        Message.is_read == False
+    ).update({'is_read': True})
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+
+@app.route('/admin/manage-support-agents')
+@login_required
+@role_required('admin')
+def manage_support_agents():
+    """Admin page to manage support agents"""
+    support_agents = User.query.filter_by(is_support_agent=True).all()
+    all_users = User.query.filter(User.role != 'admin').order_by(User.full_name).all()
+    
+    return render_template('admin_support_agents.html',
+        support_agents=support_agents,
+        all_users=all_users
+    )
+
+
+@app.route('/admin/toggle-support-agent/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def toggle_support_agent(user_id):
+    """Toggle support agent status for a user"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot modify admin users.', 'danger')
+        return redirect(url_for('manage_support_agents'))
+    
+    user.is_support_agent = not user.is_support_agent
+    db.session.commit()
+    
+    action = 'granted' if user.is_support_agent else 'revoked'
+    flash(f'Support agent access {action} for {user.full_name}.', 'success')
+    log_action('SUPPORT_AGENT_TOGGLE', 'User', user.id, f'Support agent status: {user.is_support_agent}')
+    
+    return redirect(url_for('manage_support_agents'))
+
 
 @app.route('/admin/logs')
 @login_required

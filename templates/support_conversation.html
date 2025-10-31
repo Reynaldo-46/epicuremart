@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}Support Chat - Epicuremart{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">
+                            <i class="fas fa-headset"></i> Support Chat
+                            {% if other_user.is_support_agent %}
+                            with {{ other_user.full_name or other_user.email }}
+                            <span class="badge badge-success">Support Agent</span>
+                            {% else %}
+                            with {{ other_user.full_name or other_user.email }}
+                            <span class="badge badge-info">{{ other_user.role|title }}</span>
+                            {% endif %}
+                        </div>
+                    <div>
+                        {% if other_user.is_support_agent %}
+                            {% if other_user.last_activity and (now() - other_user.last_activity).total_seconds() < 300 %}
+                            <span class="badge badge-success">
+                                <i class="fas fa-circle"></i> Online
+                            </span>
+                            {% else %}
+                            <span class="badge badge-secondary">
+                                <i class="fas fa-circle"></i> Offline
+                            </span>
+                            {% endif %}
+                        {% endif %}
+                        <a href="{% if session.is_support_agent %}{{ url_for('support_dashboard') }}{% else %}{{ url_for('customer_dashboard') }}{% endif %}" class="btn btn-sm btn-light">
+                            <i class="fas fa-arrow-left"></i> Back
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="card-body" style="height: 500px; overflow-y: auto;" id="messageContainer">
+                    {% if messages %}
+                        {% for message in messages %}
+                        <div class="mb-3 {% if message.sender_id == session.user_id %}text-right{% endif %}" id="message-{{ message.id }}">
+                            <div class="d-inline-block" style="max-width: 70%;">
+                                <div class="p-3 rounded {% if message.sender_id == session.user_id %}bg-primary text-white{% else %}bg-light{% endif %}">
+                                    <div class="font-weight-bold small mb-1">
+                                        {% if message.sender_id == session.user_id %}
+                                        You
+                                        {% else %}
+                                        {{ message.sender.full_name or message.sender.email }}
+                                        {% if message.sender.is_support_agent %}
+                                        <span class="badge badge-success">Agent</span>
+                                        {% endif %}
+                                        {% endif %}
+                                    </div>
+                                    <div>{{ message.message_text }}</div>
+                                    <div class="small mt-1 {% if message.sender_id == session.user_id %}text-white-50{% else %}text-muted{% endif %}">
+                                        {{ message.created_at.strftime('%b %d, %I:%M %p') }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="text-center text-muted py-5">
+                        <i class="fas fa-comments fa-3x mb-3"></i>
+                        <p>No messages yet. Start the conversation!</p>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="card-footer">
+                    <form id="messageForm" method="POST" action="{{ url_for('send_support_message', conversation_id=conversation.id) }}">
+                        <div class="input-group">
+                            <input type="text" name="message_text" id="messageInput" class="form-control" placeholder="Type your message..." required autocomplete="off">
+                            <div class="input-group-append">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-paper-plane"></i> Send
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Auto-scroll to bottom
+function scrollToBottom() {
+    var container = document.getElementById('messageContainer');
+    container.scrollTop = container.scrollHeight;
+}
+
+scrollToBottom();
+
+// Handle form submission
+document.getElementById('messageForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    var form = this;
+    var formData = new FormData(form);
+    var messageInput = document.getElementById('messageInput');
+    
+    fetch(form.action, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            messageInput.value = '';
+            // Reload messages
+            location.reload();
+        } else {
+            alert('Failed to send message: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to send message. Please try again.');
+    });
+});
+
+// Auto-refresh every 5 seconds to check for new messages
+setInterval(function() {
+    var lastMessageId = 0;
+    var messages = document.querySelectorAll('[id^="message-"]');
+    if (messages.length > 0) {
+        var lastMessage = messages[messages.length - 1];
+        lastMessageId = parseInt(lastMessage.id.split('-')[1]);
+    }
+    
+    fetch('{{ url_for("check_new_messages", conversation_id=conversation.id) }}?last_id=' + lastMessageId)
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.messages.length > 0) {
+            location.reload();
+        }
+    })
+    .catch(error => console.error('Error checking for new messages:', error));
+}, 5000);
+</script>
+{% endblock %}
