@@ -53,6 +53,7 @@ class User(db.Model):
     last_name = db.Column(db.String(50))
     phone = db.Column(db.String(20))
     id_document = db.Column(db.String(255))  # File path for uploaded ID
+    profile_picture = db.Column(db.String(255))  # Profile picture/business icon
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -489,6 +490,7 @@ def login():
             
             session['user_id'] = user.id
             session['role'] = user.role
+            session['profile_picture'] = user.profile_picture  # Add profile picture to session
             
             log_action('USER_LOGIN', 'User', user.id)
             
@@ -743,6 +745,97 @@ def delete_address(address_id):
     flash('Address deleted successfully.', 'success')
     return redirect(url_for('customer_profile'))
 
+
+@app.route('/profile/upload-picture', methods=['POST'])
+@login_required
+def upload_profile_picture():
+    """Upload profile picture for any user type (customer, seller, rider, courier)"""
+    user = User.query.get(session['user_id'])
+    
+    if 'profile_picture' not in request.files:
+        flash('No file selected.', 'warning')
+        return redirect(request.referrer or url_for('index'))
+    
+    file = request.files['profile_picture']
+    
+    if file.filename == '':
+        flash('No file selected.', 'warning')
+        return redirect(request.referrer or url_for('index'))
+    
+    if file and allowed_file(file.filename):
+        # Validate file size (max 5MB)
+        file.seek(0, 2)  # Seek to end of file
+        file_size = file.tell()  # Get file size
+        file.seek(0)  # Reset to beginning
+        
+        max_size = 5 * 1024 * 1024  # 5MB
+        if file_size > max_size:
+            flash('File size must be less than 5MB.', 'danger')
+            return redirect(request.referrer or url_for('index'))
+        
+        # Delete old profile picture if exists
+        if user.profile_picture:
+            old_file_path = os.path.join(app.config['UPLOAD_FOLDER'], user.profile_picture)
+            if os.path.exists(old_file_path):
+                try:
+                    os.remove(old_file_path)
+                except Exception as e:
+                    print(f"Error deleting old profile picture: {e}")
+        
+        # Save new profile picture
+        filename = secure_filename(file.filename)
+        unique_filename = f"profile_{user.role}_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(filepath)
+        
+        user.profile_picture = unique_filename
+        db.session.commit()
+        
+        # Update session with new profile picture
+        session['profile_picture'] = unique_filename
+        
+        log_action('PROFILE_PICTURE_UPLOADED', 'User', user.id, f'Uploaded profile picture')
+        flash('Profile picture updated successfully!', 'success')
+    else:
+        flash('Invalid file type. Please upload an image (PNG, JPG, JPEG, GIF, WEBP).', 'danger')
+    
+    # Redirect based on user role
+    if user.role == 'customer':
+        return redirect(url_for('customer_profile'))
+    elif user.role == 'seller':
+        return redirect(url_for('seller_dashboard'))
+    elif user.role in ['rider', 'courier']:
+        return redirect(url_for('rider_dashboard'))
+    else:
+        return redirect(url_for('index'))
+
+
+@app.route('/profile/delete-picture', methods=['POST'])
+@login_required
+def delete_profile_picture():
+    """Delete profile picture"""
+    user = User.query.get(session['user_id'])
+    
+    if user.profile_picture:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], user.profile_picture)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting profile picture: {e}")
+        
+        user.profile_picture = None
+        db.session.commit()
+        
+        # Update session to remove profile picture
+        session['profile_picture'] = None
+        
+        log_action('PROFILE_PICTURE_DELETED', 'User', user.id, 'Deleted profile picture')
+        flash('Profile picture removed successfully.', 'success')
+    else:
+        flash('No profile picture to remove.', 'info')
+    
+    return redirect(request.referrer or url_for('index'))
 
 
 
