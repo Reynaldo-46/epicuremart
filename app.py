@@ -1556,8 +1556,10 @@ def courier_dashboard():
 @login_required
 @role_required('courier')
 def courier_pickup_manifest():
-    # Orders ready for this courier to pickup
-    orders = Order.query.filter_by(courier_id=session['user_id'], status='READY_FOR_PICKUP').all()
+    # Orders assigned to this courier that are ready for pickup or in transit to rider
+    orders = Order.query.filter_by(courier_id=session['user_id'])\
+        .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER']))\
+        .order_by(Order.created_at.desc()).all()
     return render_template('courier_manifest.html', orders=orders, title='Pickup Manifest')
 
 
