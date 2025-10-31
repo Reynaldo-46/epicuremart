@@ -18,7 +18,7 @@
                             <div class="d-flex justify-content-between align-items-center">
                                 <div>
                                     <strong>{{ agent.full_name or agent.email }}</strong>
-                                    {% if agent.last_activity and (now() - agent.last_activity).total_seconds() < 300 %}
+                                    {% if agent.last_activity and (now - agent.last_activity).total_seconds() < 300 %}
                                     <span class="badge badge-success badge-sm ml-2">
                                         <i class="fas fa-circle"></i> Online
                                     </span>
@@ -59,7 +59,13 @@
                     <div>
                         <strong>Active Agents:</strong>
                         <span class="badge badge-success float-right">
-                            {{ support_agents|selectattr('last_activity')|select('lambda', 'x', (now() - x.last_activity).total_seconds() < 300)|list|length }}
+                            {% set active_count = namespace(value=0) %}
+                            {% for agent in support_agents %}
+                                {% if agent.last_activity and (now - agent.last_activity).total_seconds() < 300 %}
+                                    {% set active_count.value = active_count.value + 1 %}
+                                {% endif %}
+                            {% endfor %}
+                            {{ active_count.value }}
                         </span>
                     </div>
                 </div>

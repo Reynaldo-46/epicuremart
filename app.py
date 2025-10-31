@@ -2476,7 +2476,8 @@ def support_dashboard():
     
     return render_template('support_dashboard.html',
         conversations=conv_data,
-        support_agents=support_agents
+        support_agents=support_agents,
+        now=datetime.utcnow()
     )
 
 
