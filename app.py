@@ -2485,12 +2485,8 @@ def support_dashboard():
     return render_template('support_dashboard.html',
         conversations=conv_data,
         support_agents=support_agents,
-<<<<<<< HEAD
-        now=datetime.utcnow()
-=======
         active_agents_count=active_agents_count,
         now=now
->>>>>>> 43d1528 (Resolved merge conflicts after pulling updates)
     )
 
 
