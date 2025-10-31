@@ -17,7 +17,9 @@ from sqlalchemy import Numeric
 
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = secrets.token_hex(32)
+# Use environment variable or generate a persistent secret key
+# IMPORTANT: In production, set this as an environment variable
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'epicuremart-secret-key-change-in-production-2024'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:@localhost/epicuremart'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
