@@ -224,7 +224,7 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support'), nullable=False)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -2390,7 +2390,8 @@ def support_conversation(conversation_id):
     return render_template('support_conversation.html',
         conversation=conversation,
         other_user=other_user,
-        messages=conversation.messages
+        messages=conversation.messages,
+        now=datetime.utcnow
     )
 
 
@@ -2474,10 +2475,22 @@ def support_dashboard():
     # Get all support agents for status display
     support_agents = User.query.filter_by(is_support_agent=True).all()
     
+    # Calculate active agents (last activity within 5 minutes)
+    now = datetime.utcnow()
+    active_agents_count = 0
+    for agent in support_agents:
+        if agent.last_activity and (now - agent.last_activity).total_seconds() < 300:
+            active_agents_count += 1
+    
     return render_template('support_dashboard.html',
         conversations=conv_data,
         support_agents=support_agents,
+<<<<<<< HEAD
         now=datetime.utcnow()
+=======
+        active_agents_count=active_agents_count,
+        now=now
+>>>>>>> 43d1528 (Resolved merge conflicts after pulling updates)
     )
 
 
