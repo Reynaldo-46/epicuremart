@@ -2477,10 +2477,10 @@ def support_dashboard():
     
     # Calculate active agents (last activity within 5 minutes)
     now = datetime.utcnow()
-    active_agents_count = 0
-    for agent in support_agents:
-        if agent.last_activity and (now - agent.last_activity).total_seconds() < 300:
-            active_agents_count += 1
+    active_agents_count = sum(
+        1 for agent in support_agents 
+        if agent.last_activity and (now - agent.last_activity).total_seconds() < 300
+    )
     
     return render_template('support_dashboard.html',
         conversations=conv_data,
