@@ -31,7 +31,7 @@
                             </span>
                             {% endif %}
                         {% endif %}
-                        <a href="{% if session.is_support_agent %}{{ url_for('support_dashboard') }}{% else %}{{ url_for('customer_dashboard') }}{% endif %}" class="btn btn-sm btn-light">
+                        <a href="{% if session.is_support_agent %}{{ url_for('support_dashboard') }}{% else %}{{ url_for('index') }}{% endif %}" class="btn btn-sm btn-light">
                             <i class="fas fa-arrow-left"></i> Back
                         </a>
                     </div>
