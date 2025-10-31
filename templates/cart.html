@@ -7,7 +7,7 @@
     <div class="row">
         <div class="col-lg-8">
             {% for item in cart_items %}
-            <div class="card mb-3">
+            <div class="card mb-3" id="cart-item-{{ item.product.id }}">
                 <div class="card-body">
                     <div class="row align-items-center">
                         <div class="col-md-2">
@@ -22,16 +22,31 @@
                         <div class="col-md-4">
                             <h5>{{ item.product.name }}</h5>
                             <p class="text-muted mb-0">{{ item.product.shop.name }}</p>
+                            <small class="text-muted">Stock: {{ item.product.stock }}</small>
                         </div>
                         <div class="col-md-2">
-                            <p class="mb-0">₱{{ "%.2f"|format(item.product.price) }}</p>
+                            <p class="mb-0">₱<span class="item-price" data-price="{{ item.product.price }}">{{ "%.2f"|format(item.product.price) }}</span></p>
                         </div>
                         <div class="col-md-2">
-                            <p class="mb-0">Qty: {{ item.quantity }}</p>
+                            <form method="POST" action="{{ url_for('update_cart_quantity', product_id=item.product.id) }}" class="d-flex align-items-center gap-2">
+                                <input type="number" 
+                                       name="quantity" 
+                                       value="{{ item.quantity }}" 
+                                       min="1" 
+                                       max="{{ item.product.stock }}" 
+                                       class="form-control form-control-sm quantity-input"
+                                       data-product-id="{{ item.product.id }}"
+                                       style="width: 70px;">
+                                <button type="submit" class="btn btn-sm btn-outline-primary" title="Update quantity">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </form>
                         </div>
                         <div class="col-md-2 text-end">
-                            <p class="fw-bold mb-2">₱{{ "%.2f"|format(item.subtotal) }}</p>
-                            <a href="{{ url_for('remove_from_cart', product_id=item.product.id) }}" class="btn btn-sm btn-danger">
+                            <p class="fw-bold mb-2">₱<span class="item-subtotal">{{ "%.2f"|format(item.subtotal) }}</span></p>
+                            <a href="{{ url_for('remove_from_cart', product_id=item.product.id) }}" 
+                               class="btn btn-sm btn-danger"
+                               onclick="return confirm('Remove this item from cart?')">
                                 <i class="fas fa-trash"></i>
                             </a>
                         </div>
@@ -42,20 +57,23 @@
         </div>
         
         <div class="col-lg-4">
-            <div class="card">
+            <div class="card sticky-top" style="top: 20px;">
                 <div class="card-body">
                     <h4>Order Summary</h4>
                     <hr>
                     <div class="d-flex justify-content-between mb-2">
                         <span>Subtotal:</span>
-                        <span>₱{{ "%.2f"|format(total) }}</span>
+                        <span>₱<span id="cart-total">{{ "%.2f"|format(total) }}</span></span>
                     </div>
                     <div class="d-flex justify-content-between mb-3">
                         <span class="fw-bold">Total:</span>
-                        <span class="fw-bold h4">₱{{ "%.2f"|format(total) }}</span>
+                        <span class="fw-bold h4">₱<span id="cart-total-display">{{ "%.2f"|format(total) }}</span></span>
                     </div>
                     <a href="{{ url_for('checkout') }}" class="btn btn-primary w-100">
                         <i class="fas fa-credit-card"></i> Proceed to Checkout
+                    </a>
+                    <a href="{{ url_for('browse') }}" class="btn btn-outline-secondary w-100 mt-2">
+                        <i class="fas fa-arrow-left"></i> Continue Shopping
                     </a>
                 </div>
             </div>
@@ -67,4 +85,53 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+// Real-time price calculation when quantity changes
+document.addEventListener('DOMContentLoaded', function() {
+    const quantityInputs = document.querySelectorAll('.quantity-input');
+    
+    quantityInputs.forEach(input => {
+        input.addEventListener('input', function() {
+            updateItemSubtotal(this);
+            updateCartTotal();
+        });
+    });
+});
+
+function updateItemSubtotal(input) {
+    const productId = input.dataset.productId;
+    const cartItem = document.getElementById('cart-item-' + productId);
+    const priceElement = cartItem.querySelector('.item-price');
+    const subtotalElement = cartItem.querySelector('.item-subtotal');
+    
+    const price = parseFloat(priceElement.dataset.price);
+    const quantity = parseInt(input.value) || 0;
+    const subtotal = price * quantity;
+    
+    subtotalElement.textContent = subtotal.toFixed(2);
+}
+
+function updateCartTotal() {
+    let total = 0;
+    document.querySelectorAll('.item-subtotal').forEach(subtotalElement => {
+        total += parseFloat(subtotalElement.textContent) || 0;
+    });
+    
+    document.getElementById('cart-total').textContent = total.toFixed(2);
+    document.getElementById('cart-total-display').textContent = total.toFixed(2);
+}
+</script>
+
+<style>
+.quantity-input::-webkit-outer-spin-button,
+.quantity-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.quantity-input {
+    -moz-appearance: textfield;
+}
+</style>
 {% endblock %}

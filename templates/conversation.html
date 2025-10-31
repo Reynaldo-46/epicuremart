@@ -12,18 +12,25 @@
                             <i class="fas fa-arrow-left"></i>
                         </a>
                         <div class="avatar-circle me-3">
-                            <i class="fas {% if session.role == 'customer' %}fa-store{% else %}fa-user{% endif %} fa-lg"></i>
+                            {% set other_user = conversation.user2 if conversation.user1_id == session.user_id else conversation.user1 %}
+                            <i class="fas {% if other_user.role == 'seller' %}fa-store{% elif other_user.role == 'rider' %}fa-motorcycle{% else %}fa-user{% endif %} fa-lg"></i>
                         </div>
                         <div>
                             <h5 class="mb-0">
-                                {% if session.role == 'customer' %}
+                                {% if conversation.conversation_type == 'buyer_seller' and conversation.shop %}
                                     {{ conversation.shop.name }}
                                 {% else %}
-                                    {{ conversation.customer.full_name }}
+                                    {{ other_user.full_name }}
                                 {% endif %}
                             </h5>
                             <small class="text-white-50">
-                                <i class="fas fa-circle text-success" style="font-size: 8px;"></i> Online
+                                {% if conversation.conversation_type == 'buyer_seller' %}
+                                    <i class="fas fa-shopping-bag"></i> Shop Conversation
+                                {% elif conversation.conversation_type == 'seller_rider' %}
+                                    <i class="fas fa-truck"></i> Delivery Coordination
+                                {% elif conversation.conversation_type == 'buyer_rider' %}
+                                    <i class="fas fa-map-marker-alt"></i> Order Delivery
+                                {% endif %}
                             </small>
                         </div>
                     </div>

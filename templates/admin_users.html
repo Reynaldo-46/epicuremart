@@ -4,6 +4,30 @@
 <div class="container">
     <h2 class="mb-4"><i class="fas fa-users"></i> User Management</h2>
 
+    <!-- Role Filter Tabs -->
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <a class="nav-link {% if role_filter == 'all' %}active{% endif %}" href="?role=all">
+                All Users <span class="badge bg-secondary">{{ role_counts.all }}</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if role_filter == 'customer' %}active{% endif %}" href="?role=customer">
+                Buyers <span class="badge bg-primary">{{ role_counts.customer }}</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if role_filter == 'seller' %}active{% endif %}" href="?role=seller">
+                Sellers <span class="badge bg-success">{{ role_counts.seller }}</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if role_filter == 'rider' or role_filter == 'courier' %}active{% endif %}" href="?role=rider">
+                Riders/Couriers <span class="badge bg-warning">{{ role_counts.rider }}</span>
+            </a>
+        </li>
+    </ul>
+
     <div class="card">
         <div class="card-body">
             <div class="table-responsive">
@@ -20,6 +44,7 @@
                         </tr>
                     </thead>
                     <tbody>
+                        {% if users %}
                         {% for user in users %}
                         <tr>
                             <td>{{ user.id }}</td>
@@ -52,6 +77,11 @@
                             <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
                         </tr>
                         {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted">No users found for this filter.</td>
+                        </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>

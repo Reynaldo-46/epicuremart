@@ -17,7 +17,9 @@ from sqlalchemy import Numeric
 
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = secrets.token_hex(32)
+# Use environment variable or generate a persistent secret key
+# IMPORTANT: In production, set this as an environment variable
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'epicuremart-secret-key-change-in-production-2024'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:@localhost/epicuremart'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
@@ -48,7 +50,14 @@ class User(db.Model):
     is_verified = db.Column(db.Boolean, default=False)
     is_approved = db.Column(db.Boolean, default=True)  # Admin approval for sellers/couriers/riders
     full_name = db.Column(db.String(100))
+    first_name = db.Column(db.String(50))
+    middle_name = db.Column(db.String(50))
+    last_name = db.Column(db.String(50))
     phone = db.Column(db.String(20))
+    id_document = db.Column(db.String(255))  # File path for uploaded ID
+    profile_picture = db.Column(db.String(255))  # Profile picture/business icon
+    is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
+    last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -110,7 +119,11 @@ class Address(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     label = db.Column(db.String(50))  # Home, Work, etc.
     full_address = db.Column(db.Text, nullable=False)
+    region = db.Column(db.String(100))
+    province = db.Column(db.String(100))
+    municipality = db.Column(db.String(100))
     city = db.Column(db.String(100))
+    barangay = db.Column(db.String(100))
     postal_code = db.Column(db.String(20))
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -141,6 +154,9 @@ class Order(db.Model):
     # QR Tokens
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
     delivery_token = db.Column(db.String(500))  # JWT for customer delivery
+    
+    # Proof of Delivery
+    proof_of_delivery = db.Column(db.String(255))  # Photo uploaded by rider as proof
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -204,15 +220,18 @@ class AuditLog(db.Model):
 class Conversation(db.Model):
     __tablename__ = 'conversations'
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False)
+    user1_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support'), nullable=False)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    customer = db.relationship('User', foreign_keys=[customer_id])
-    seller = db.relationship('User', foreign_keys=[seller_id])
-    shop = db.relationship('Shop')
+    user1 = db.relationship('User', foreign_keys=[user1_id])
+    user2 = db.relationship('User', foreign_keys=[user2_id])
+    shop = db.relationship('Shop', foreign_keys=[shop_id])
+    order = db.relationship('Order', foreign_keys=[order_id])
     messages = db.relationship('Message', backref='conversation', cascade='all, delete-orphan', order_by='Message.created_at')
 
 
@@ -351,9 +370,24 @@ def register():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
         role = request.form.get('role', 'customer')
-        full_name = request.form.get('full_name')
+        first_name = request.form.get('first_name')
+        middle_name = request.form.get('middle_name', '')
+        last_name = request.form.get('last_name')
         phone = request.form.get('phone')
+        
+        # Address fields
+        region = request.form.get('region')
+        province = request.form.get('province')
+        municipality = request.form.get('municipality')
+        city = request.form.get('city')
+        barangay = request.form.get('barangay')
+        
+        # Validate password match
+        if password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return redirect(url_for('register'))
         
         if User.query.filter_by(email=email).first():
             flash('Email already registered.', 'danger')
@@ -362,17 +396,57 @@ def register():
         # Sellers, couriers, riders need admin approval
         is_approved = True if role == 'customer' else False
         
+        # Construct full name
+        full_name = f"{first_name} {middle_name} {last_name}".replace('  ', ' ').strip()
+        
         user = User(
             email=email,
             role=role,
             full_name=full_name,
+            first_name=first_name,
+            middle_name=middle_name,
+            last_name=last_name,
             phone=phone,
             is_approved=is_approved
         )
         user.set_password(password)
         
+        # Handle ID document upload for sellers, couriers, riders
+        if role in ['seller', 'courier', 'rider']:
+            if 'id_document' in request.files:
+                file = request.files['id_document']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"id_{role}_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.id_document = filename
+                else:
+                    flash('Valid ID document is required for this role.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('ID document upload is required for sellers, couriers, and riders.', 'danger')
+                return redirect(url_for('register'))
+        
         db.session.add(user)
         db.session.commit()
+        
+        # Create address entry if provided
+        if region and province and barangay:
+            full_address = f"{barangay}, {city or municipality}, {province}, {region}"
+            address = Address(
+                user_id=user.id,
+                label='Home',
+                full_address=full_address,
+                region=region,
+                province=province,
+                municipality=municipality,
+                city=city,
+                barangay=barangay,
+                is_default=True
+            )
+            db.session.add(address)
+            db.session.commit()
         
         # Send verification email
         verification_token = generate_qr_token(user.id, 'email_verify', expiry_hours=48)
@@ -423,6 +497,8 @@ def login():
             
             session['user_id'] = user.id
             session['role'] = user.role
+            session['profile_picture'] = user.profile_picture  # Add profile picture to session
+            session['is_support_agent'] = user.is_support_agent if hasattr(user, 'is_support_agent') else False  # Add support agent status
             
             log_action('USER_LOGIN', 'User', user.id)
             
@@ -523,6 +599,29 @@ def add_to_cart(product_id):
     return redirect(url_for('browse'))
 
 
+@app.route('/buy-now/<int:product_id>', methods=['POST'])
+@login_required
+@role_required('customer')
+def buy_now(product_id):
+    """Buy Now - Skip cart and go directly to checkout with this product"""
+    product = Product.query.get_or_404(product_id)
+    quantity = int(request.form.get('quantity', 1))
+    
+    # Validate stock
+    if product.stock < quantity:
+        flash(f'Only {product.stock} units available.', 'danger')
+        return redirect(url_for('product_detail', product_id=product_id))
+    
+    if product.stock == 0:
+        flash('This product is out of stock.', 'danger')
+        return redirect(url_for('product_detail', product_id=product_id))
+    
+    # Create a temporary cart for immediate checkout
+    session['buy_now_cart'] = {str(product_id): quantity}
+    
+    return redirect(url_for('checkout'))
+
+
 @app.route('/cart/remove/<int:product_id>')
 @login_required
 def remove_from_cart(product_id):
@@ -532,6 +631,31 @@ def remove_from_cart(product_id):
         session['cart'] = cart
         flash('Item removed from cart.', 'info')
     return redirect(url_for('view_cart'))
+
+
+@app.route('/cart/update/<int:product_id>', methods=['POST'])
+@login_required
+def update_cart_quantity(product_id):
+    """Update quantity of a product in the cart"""
+    product = Product.query.get_or_404(product_id)
+    new_quantity = int(request.form.get('quantity', 1))
+    
+    # Validate quantity
+    if new_quantity < 1:
+        flash('Quantity must be at least 1.', 'warning')
+        return redirect(url_for('view_cart'))
+    
+    if new_quantity > product.stock:
+        flash(f'Only {product.stock} units available for {product.name}.', 'warning')
+        return redirect(url_for('view_cart'))
+    
+    cart = session.get('cart', {})
+    cart[str(product_id)] = new_quantity
+    session['cart'] = cart
+    
+    flash(f'Updated quantity for {product.name}.', 'success')
+    return redirect(url_for('view_cart'))
+
 
 @app.route('/customer/address/add', methods=['POST'])
 @login_required
@@ -630,13 +754,111 @@ def delete_address(address_id):
     return redirect(url_for('customer_profile'))
 
 
+@app.route('/profile/upload-picture', methods=['POST'])
+@login_required
+def upload_profile_picture():
+    """Upload profile picture for any user type (customer, seller, rider, courier)"""
+    user = User.query.get(session['user_id'])
+    
+    if 'profile_picture' not in request.files:
+        flash('No file selected.', 'warning')
+        return redirect(request.referrer or url_for('index'))
+    
+    file = request.files['profile_picture']
+    
+    if file.filename == '':
+        flash('No file selected.', 'warning')
+        return redirect(request.referrer or url_for('index'))
+    
+    if file and allowed_file(file.filename):
+        # Validate file size (max 5MB)
+        file.seek(0, 2)  # Seek to end of file
+        file_size = file.tell()  # Get file size
+        file.seek(0)  # Reset to beginning
+        
+        max_size = 5 * 1024 * 1024  # 5MB
+        if file_size > max_size:
+            flash('File size must be less than 5MB.', 'danger')
+            return redirect(request.referrer or url_for('index'))
+        
+        # Delete old profile picture if exists
+        if user.profile_picture:
+            old_file_path = os.path.join(app.config['UPLOAD_FOLDER'], user.profile_picture)
+            if os.path.exists(old_file_path):
+                try:
+                    os.remove(old_file_path)
+                except Exception as e:
+                    print(f"Error deleting old profile picture: {e}")
+        
+        # Save new profile picture
+        filename = secure_filename(file.filename)
+        unique_filename = f"profile_{user.role}_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(filepath)
+        
+        user.profile_picture = unique_filename
+        db.session.commit()
+        
+        # Update session with new profile picture
+        session['profile_picture'] = unique_filename
+        
+        log_action('PROFILE_PICTURE_UPLOADED', 'User', user.id, f'Uploaded profile picture')
+        flash('Profile picture updated successfully!', 'success')
+    else:
+        flash('Invalid file type. Please upload an image (PNG, JPG, JPEG, GIF, WEBP).', 'danger')
+    
+    # Redirect based on user role
+    if user.role == 'customer':
+        return redirect(url_for('customer_profile'))
+    elif user.role == 'seller':
+        return redirect(url_for('seller_dashboard'))
+    elif user.role in ['rider', 'courier']:
+        return redirect(url_for('rider_dashboard'))
+    else:
+        return redirect(url_for('index'))
+
+
+@app.route('/profile/delete-picture', methods=['POST'])
+@login_required
+def delete_profile_picture():
+    """Delete profile picture"""
+    user = User.query.get(session['user_id'])
+    
+    if user.profile_picture:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], user.profile_picture)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting profile picture: {e}")
+        
+        user.profile_picture = None
+        db.session.commit()
+        
+        # Update session to remove profile picture
+        session['profile_picture'] = None
+        
+        log_action('PROFILE_PICTURE_DELETED', 'User', user.id, 'Deleted profile picture')
+        flash('Profile picture removed successfully.', 'success')
+    else:
+        flash('No profile picture to remove.', 'info')
+    
+    return redirect(request.referrer or url_for('index'))
+
 
 
 @app.route('/checkout', methods=['GET', 'POST'])
 @login_required
 @role_required('customer')
 def checkout():
-    cart = session.get('cart', {})
+    # Check for buy_now_cart first, then regular cart
+    buy_now_cart = session.get('buy_now_cart', {})
+    regular_cart = session.get('cart', {})
+    
+    # Use buy_now_cart if it exists, otherwise use regular cart
+    cart = buy_now_cart if buy_now_cart else regular_cart
+    is_buy_now = bool(buy_now_cart)
+    
     if not cart:
         flash('Your cart is empty.', 'warning')
         return redirect(url_for('browse'))
@@ -645,6 +867,44 @@ def checkout():
     
     if request.method == 'POST':
         address_id = request.form.get('address_id')
+        
+        if not address_id:
+            flash('Please select a delivery address.', 'warning')
+            return redirect(url_for('checkout'))
+        
+        # Get delivery address to calculate delivery fee
+        delivery_address = Address.query.get(address_id)
+        if not delivery_address or delivery_address.user_id != session['user_id']:
+            flash('Invalid delivery address.', 'danger')
+            return redirect(url_for('checkout'))
+        
+        # Validate stock availability BEFORE creating orders
+        for product_id, quantity in cart.items():
+            product = Product.query.get(int(product_id))
+            if not product:
+                flash(f'Product not found.', 'danger')
+                return redirect(url_for('view_cart'))
+            
+            if product.stock < quantity:
+                flash(f'Insufficient stock for {product.name}. Only {product.stock} available.', 'danger')
+                return redirect(url_for('view_cart'))
+            
+            if product.stock == 0:
+                flash(f'{product.name} is out of stock.', 'danger')
+                return redirect(url_for('view_cart'))
+        
+        # Calculate delivery fee based on address
+        delivery_fee_obj = DeliveryFee.query.filter_by(
+            city=delivery_address.city
+        ).first()
+        
+        if not delivery_fee_obj and delivery_address.province:
+            # Try to find by province if city not found
+            delivery_fee_obj = DeliveryFee.query.filter_by(
+                province=delivery_address.province
+            ).first()
+        
+        delivery_fee = float(delivery_fee_obj.fee) if delivery_fee_obj else 50.00  # Default 50 pesos
         
         # Group items by shop
         shop_orders = {}
@@ -657,17 +917,23 @@ def checkout():
         
         # Create order for each shop
         for shop_id, items in shop_orders.items():
-            total = sum([float(p.price) * q for p, q in items])
+            subtotal = sum([float(p.price) * q for p, q in items])
             
-            commission = total * 0.05
-            seller_amount = total - commission
+            # Calculate total with delivery fee
+            total_amount = subtotal + delivery_fee
+            
+            # Calculate commission on subtotal (not including delivery fee)
+            commission = subtotal * 0.05
+            seller_amount = subtotal - commission
             
             order = Order(
                 order_number=generate_order_number(),
                 customer_id=session['user_id'],
                 shop_id=shop_id,
                 delivery_address_id=address_id,
-                total_amount=total,
+                subtotal=subtotal,
+                delivery_fee=delivery_fee,
+                total_amount=total_amount,
                 commission_rate=5.00,
                 commission_amount=commission,
                 seller_amount=seller_amount,
@@ -676,6 +942,7 @@ def checkout():
             db.session.add(order)
             db.session.flush()
             
+            # Create order items and DEDUCT STOCK
             for product, quantity in items:
                 order_item = OrderItem(
                     order_id=order.id,
@@ -684,11 +951,21 @@ def checkout():
                     price=product.price
                 )
                 db.session.add(order_item)
+                
+                # DEDUCT STOCK IMMEDIATELY upon order creation
+                product.stock -= quantity
+                
+                log_action('STOCK_DEDUCTED', 'Product', product.id, 
+                          f'Deducted {quantity} units for order {order.order_number}')
             
             log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
         
         db.session.commit()
+        
+        # Clear both regular cart and buy_now_cart
         session['cart'] = {}
+        if 'buy_now_cart' in session:
+            session.pop('buy_now_cart')
         
         # Send confirmation email
         user = User.query.get(session['user_id'])
@@ -701,7 +978,43 @@ def checkout():
         flash('Order(s) placed successfully!', 'success')
         return redirect(url_for('customer_orders'))
     
-    return render_template('checkout.html', addresses=addresses)
+    # Calculate cart preview with delivery fee estimate
+    cart_items = []
+    subtotal = 0
+    for product_id, quantity in cart.items():
+        product = Product.query.get(int(product_id))
+        if product:
+            item_total = float(product.price) * quantity
+            subtotal += item_total
+            cart_items.append({
+                'product': product,
+                'quantity': quantity,
+                'subtotal': item_total
+            })
+    
+    # Get delivery fee estimate if user has a default address
+    default_address = Address.query.filter_by(
+        user_id=session['user_id'], 
+        is_default=True
+    ).first()
+    
+    estimated_delivery_fee = 50.00  # Default
+    if default_address:
+        delivery_fee_obj = DeliveryFee.query.filter_by(
+            city=default_address.city
+        ).first()
+        if delivery_fee_obj:
+            estimated_delivery_fee = float(delivery_fee_obj.fee)
+    
+    estimated_total = subtotal + estimated_delivery_fee
+    
+    return render_template('checkout.html', 
+        addresses=addresses,
+        cart_items=cart_items,
+        subtotal=subtotal,
+        estimated_delivery_fee=estimated_delivery_fee,
+        estimated_total=estimated_total
+    )
 
 
 @app.route('/customer/orders')
@@ -848,10 +1161,46 @@ def product_detail(product_id):
 @login_required
 @role_required('seller')
 def seller_dashboard():
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+    
     user = User.query.get(session['user_id'])
     
     if not user.shop:
         return redirect(url_for('create_shop'))
+    
+    # Get filter parameters
+    time_filter = request.args.get('filter', 'all')
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    # Parse custom date range if provided
+    now = datetime.utcnow()
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            time_filter = 'custom'
+        except ValueError:
+            flash('Invalid date format. Please use YYYY-MM-DD.', 'warning')
+            start_date = None
+            end_date = None
+    
+    # Calculate date range based on predefined filter if no custom range
+    if not start_date and not end_date:
+        if time_filter == 'day':
+            start_date = now - timedelta(days=1)
+        elif time_filter == 'week':
+            start_date = now - timedelta(weeks=1)
+        elif time_filter == 'month':
+            start_date = now - timedelta(days=30)
+        elif time_filter == 'year':
+            start_date = now - timedelta(days=365)
+        else:
+            start_date = None
     
     # Statistics
     total_products = Product.query.filter_by(shop_id=user.shop.id).count()
@@ -865,6 +1214,96 @@ def seller_dashboard():
         status='READY_FOR_PICKUP'
     ).count()
     
+    # Revenue calculations
+    revenue_query = db.session.query(func.sum(Order.seller_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
+    if start_date:
+        revenue_query = revenue_query.filter(Order.created_at >= start_date)
+    if end_date:
+        revenue_query = revenue_query.filter(Order.created_at <= end_date)
+    total_revenue = revenue_query.scalar() or 0
+    
+    # Total sales (before commission)
+    sales_query = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
+    if start_date:
+        sales_query = sales_query.filter(Order.created_at >= start_date)
+    if end_date:
+        sales_query = sales_query.filter(Order.created_at <= end_date)
+    total_sales = sales_query.scalar() or 0
+    
+    # Average order value
+    avg_order_query = db.session.query(func.avg(Order.total_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED')
+    if start_date:
+        avg_order_query = avg_order_query.filter(Order.created_at >= start_date)
+    if end_date:
+        avg_order_query = avg_order_query.filter(Order.created_at <= end_date)
+    avg_order_value = avg_order_query.scalar() or 0
+    
+    # Revenue data for chart
+    revenue_chart_data = []
+    if time_filter == 'day' or time_filter == 'week':
+        # Daily data for last 7 days
+        for i in range(6, -1, -1):
+            date = now - timedelta(days=i)
+            day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            
+            daily_revenue = db.session.query(func.sum(Order.seller_amount))\
+                .filter(Order.shop_id == user.shop.id,
+                        Order.created_at >= day_start, 
+                        Order.created_at < day_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': day_start.strftime('%b %d'),
+                'value': float(daily_revenue)
+            })
+    elif time_filter == 'month':
+        # Weekly data for last 4 weeks
+        for i in range(3, -1, -1):
+            week_start = now - timedelta(weeks=i+1)
+            week_end = now - timedelta(weeks=i)
+            
+            weekly_revenue = db.session.query(func.sum(Order.seller_amount))\
+                .filter(Order.shop_id == user.shop.id,
+                        Order.created_at >= week_start, 
+                        Order.created_at < week_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': f'Week {i+1}',
+                'value': float(weekly_revenue)
+            })
+    else:
+        # Monthly data for last 12 months
+        for i in range(11, -1, -1):
+            month_start = (now - timedelta(days=30*i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if i == 0:
+                month_end = now
+            else:
+                month_end = (now - timedelta(days=30*(i-1))).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            monthly_revenue = db.session.query(func.sum(Order.seller_amount))\
+                .filter(Order.shop_id == user.shop.id,
+                        Order.created_at >= month_start, 
+                        Order.created_at < month_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': month_start.strftime('%b %Y'),
+                'value': float(monthly_revenue)
+            })
+    
+    # Top selling products
+    top_products = db.session.query(
+        Product.name, 
+        func.sum(OrderItem.quantity).label('total_sold')
+    ).join(OrderItem).join(Order)\
+        .filter(Product.shop_id == user.shop.id, Order.status == 'DELIVERED')\
+        .group_by(Product.id).order_by(func.sum(OrderItem.quantity).desc()).limit(5).all()
+    
     recent_orders = Order.query.filter_by(shop_id=user.shop.id)\
         .order_by(Order.created_at.desc()).limit(5).all()
     
@@ -874,6 +1313,14 @@ def seller_dashboard():
         total_orders=total_orders,
         pending_orders=pending_orders,
         ready_orders=ready_orders,
+        total_revenue=total_revenue,
+        total_sales=total_sales,
+        avg_order_value=avg_order_value,
+        revenue_chart_data=revenue_chart_data,
+        top_products=top_products,
+        time_filter=time_filter,
+        start_date=start_date_str,
+        end_date=end_date_str,
         recent_orders=recent_orders
     )
 
@@ -1114,8 +1561,10 @@ def courier_dashboard():
 @login_required
 @role_required('courier')
 def courier_pickup_manifest():
-    # Orders ready for this courier to pickup
-    orders = Order.query.filter_by(courier_id=session['user_id'], status='READY_FOR_PICKUP').all()
+    # Orders assigned to this courier that are ready for pickup or in transit to rider
+    orders = Order.query.filter_by(courier_id=session['user_id'])\
+        .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER']))\
+        .order_by(Order.created_at.desc()).all()
     return render_template('courier_manifest.html', orders=orders, title='Pickup Manifest')
 
 
@@ -1258,32 +1707,55 @@ def rider_confirm_delivery(order_id):
         return redirect(url_for('rider_dashboard'))
     
     if request.method == 'POST':
-        # Customer should scan QR to confirm
-        token = request.form.get('token')
-        
-        payload = verify_qr_token(token)
-        if not payload or payload.get('type') != 'delivery' or payload['order_id'] != order_id:
-            flash('Invalid delivery confirmation.', 'danger')
+        # Check if proof of delivery photo is uploaded
+        if 'proof_of_delivery' not in request.files:
+            flash('Please upload proof of delivery photo.', 'warning')
             return redirect(url_for('rider_confirm_delivery', order_id=order_id))
         
-        order.status = 'DELIVERED'
-        db.session.commit()
+        file = request.files['proof_of_delivery']
         
-        log_action('ORDER_DELIVERED', 'Order', order.id, f'Order {order.order_number} delivered')
+        if file.filename == '':
+            flash('Please upload proof of delivery photo.', 'warning')
+            return redirect(url_for('rider_confirm_delivery', order_id=order_id))
         
-        # Notify customer and seller
-        send_email(
-            order.customer.email,
-            'Order Delivered',
-            f'Your order {order.order_number} has been delivered successfully!'
-        )
-        
-        flash(f'Order {order.order_number} delivered successfully!', 'success')
-        return redirect(url_for('rider_dashboard'))
+        if file and allowed_file(file.filename):
+            # Validate file size (max 10MB for photos)
+            file.seek(0, 2)
+            file_size = file.tell()
+            file.seek(0)
+            
+            max_size = 10 * 1024 * 1024  # 10MB
+            if file_size > max_size:
+                flash('File size must be less than 10MB.', 'danger')
+                return redirect(url_for('rider_confirm_delivery', order_id=order_id))
+            
+            # Save proof of delivery photo
+            filename = secure_filename(file.filename)
+            unique_filename = f"proof_delivery_{order.order_number}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            file.save(filepath)
+            
+            order.proof_of_delivery = unique_filename
+            order.status = 'DELIVERED'
+            db.session.commit()
+            
+            log_action('ORDER_DELIVERED', 'Order', order.id, f'Order {order.order_number} delivered with proof')
+            
+            # Notify customer and seller
+            send_email(
+                order.customer.email,
+                'Order Delivered',
+                f'Your order {order.order_number} has been delivered successfully!'
+            )
+            
+            flash(f'Order {order.order_number} delivered successfully!', 'success')
+            return redirect(url_for('rider_dashboard'))
+        else:
+            flash('Invalid file type. Please upload an image (PNG, JPG, JPEG, GIF, WEBP).', 'danger')
+            return redirect(url_for('rider_confirm_delivery', order_id=order_id))
     
-    # Show QR for customer to scan
-    qr_data = generate_qr_code(order.delivery_token)
-    return render_template('rider_delivery_confirm.html', order=order, qr_data=qr_data)
+    # Show delivery confirmation form with photo upload
+    return render_template('rider_delivery_confirm.html', order=order)
 
 
 @app.route('/rider/history')
@@ -1301,21 +1773,151 @@ def rider_history():
 @login_required
 @role_required('admin')
 def admin_dashboard():
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+    
+    # Get filter parameters
+    time_filter = request.args.get('filter', 'all')
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    # Parse custom date range if provided
+    now = datetime.utcnow()
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            time_filter = 'custom'
+        except ValueError:
+            flash('Invalid date format. Please use YYYY-MM-DD.', 'warning')
+            start_date = None
+            end_date = None
+    
+    # Calculate date range based on predefined filter if no custom range
+    if not start_date and not end_date:
+        if time_filter == 'day':
+            start_date = now - timedelta(days=1)
+        elif time_filter == 'week':
+            start_date = now - timedelta(weeks=1)
+        elif time_filter == 'month':
+            start_date = now - timedelta(days=30)
+        elif time_filter == 'year':
+            start_date = now - timedelta(days=365)
+        else:
+            start_date = None
+    
+    # Base query for orders
+    order_query = Order.query
+    if start_date:
+        order_query = order_query.filter(Order.created_at >= start_date)
+    if end_date:
+        order_query = order_query.filter(Order.created_at <= end_date)
+    
     # Statistics
     total_users = User.query.count()
+    total_buyers = User.query.filter_by(role='customer').count()
     total_sellers = User.query.filter_by(role='seller').count()
+    total_riders = User.query.filter(User.role.in_(['rider', 'courier'])).count()
     total_orders = Order.query.count()
     total_products = Product.query.count()
     pending_approvals = User.query.filter_by(is_approved=False).count()
+    
+    # Revenue and commission tracking
+    total_revenue = db.session.query(func.sum(Order.total_amount))\
+        .filter(Order.status == 'DELIVERED')
+    if start_date:
+        total_revenue = total_revenue.filter(Order.created_at >= start_date)
+    if end_date:
+        total_revenue = total_revenue.filter(Order.created_at <= end_date)
+    total_revenue = total_revenue.scalar() or 0
+    
+    # Commission received (from delivered orders)
+    commission_received = db.session.query(func.sum(Order.commission_amount))\
+        .filter(Order.status == 'DELIVERED')
+    if start_date:
+        commission_received = commission_received.filter(Order.created_at >= start_date)
+    if end_date:
+        commission_received = commission_received.filter(Order.created_at <= end_date)
+    commission_received = commission_received.scalar() or 0
+    
+    # Commission pending (from non-delivered orders)
+    commission_pending = db.session.query(func.sum(Order.commission_amount))\
+        .filter(Order.status.in_(['PENDING_PAYMENT', 'READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER', 'OUT_FOR_DELIVERY']))
+    if start_date:
+        commission_pending = commission_pending.filter(Order.created_at >= start_date)
+    if end_date:
+        commission_pending = commission_pending.filter(Order.created_at <= end_date)
+    commission_pending = commission_pending.scalar() or 0
+    
+    # Revenue data for chart (last 7 days/weeks/months depending on filter)
+    revenue_chart_data = []
+    if time_filter == 'day' or time_filter == 'week':
+        # Daily data for last 7 days
+        for i in range(6, -1, -1):
+            date = now - timedelta(days=i)
+            day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            
+            daily_revenue = db.session.query(func.sum(Order.total_amount))\
+                .filter(Order.created_at >= day_start, Order.created_at < day_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': day_start.strftime('%b %d'),
+                'value': float(daily_revenue)
+            })
+    elif time_filter == 'month':
+        # Weekly data for last 4 weeks
+        for i in range(3, -1, -1):
+            week_start = now - timedelta(weeks=i+1)
+            week_end = now - timedelta(weeks=i)
+            
+            weekly_revenue = db.session.query(func.sum(Order.total_amount))\
+                .filter(Order.created_at >= week_start, Order.created_at < week_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': f'Week {i+1}',
+                'value': float(weekly_revenue)
+            })
+    else:
+        # Monthly data for last 12 months
+        for i in range(11, -1, -1):
+            month_start = (now - timedelta(days=30*i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if i == 0:
+                month_end = now
+            else:
+                month_end = (now - timedelta(days=30*(i-1))).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            monthly_revenue = db.session.query(func.sum(Order.total_amount))\
+                .filter(Order.created_at >= month_start, Order.created_at < month_end,
+                        Order.status == 'DELIVERED').scalar() or 0
+            
+            revenue_chart_data.append({
+                'label': month_start.strftime('%b %Y'),
+                'value': float(monthly_revenue)
+            })
     
     recent_logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(10).all()
     
     return render_template('admin_dashboard.html',
         total_users=total_users,
+        total_buyers=total_buyers,
         total_sellers=total_sellers,
+        total_riders=total_riders,
         total_orders=total_orders,
         total_products=total_products,
         pending_approvals=pending_approvals,
+        total_revenue=total_revenue,
+        commission_received=commission_received,
+        commission_pending=commission_pending,
+        revenue_chart_data=revenue_chart_data,
+        time_filter=time_filter,
+        start_date=start_date_str,
+        end_date=end_date_str,
         recent_logs=recent_logs
     )
 
@@ -1374,8 +1976,27 @@ def reject_user(user_id):
 @login_required
 @role_required('admin')
 def admin_users():
-    users = User.query.order_by(User.created_at.desc()).all()
-    return render_template('admin_users.html', users=users)
+    role_filter = request.args.get('role', 'all')
+    
+    query = User.query
+    if role_filter != 'all':
+        query = query.filter_by(role=role_filter)
+    
+    users = query.order_by(User.created_at.desc()).all()
+    
+    # Count by role
+    role_counts = {
+        'all': User.query.count(),
+        'customer': User.query.filter_by(role='customer').count(),
+        'seller': User.query.filter_by(role='seller').count(),
+        'rider': User.query.filter(User.role.in_(['rider', 'courier'])).count(),
+    }
+    
+    return render_template('admin_users.html', 
+        users=users, 
+        role_filter=role_filter,
+        role_counts=role_counts
+    )
 
 
 @app.route('/admin/categories', methods=['GET', 'POST'])
@@ -1464,28 +2085,45 @@ def admin_analytics():
 def messages_inbox():
     user = User.query.get(session['user_id'])
     
-    if user.role == 'customer':
-        conversations = Conversation.query.filter_by(customer_id=user.id)\
-            .order_by(Conversation.last_message_at.desc()).all()
-    elif user.role == 'seller':
-        conversations = Conversation.query.filter_by(seller_id=user.id)\
-            .order_by(Conversation.last_message_at.desc()).all()
-    else:
-        flash('Only customers and sellers can access messages.', 'warning')
-        return redirect(url_for('index'))
+    # Get all conversations where user is either user1 or user2
+    conversations = Conversation.query.filter(
+        db.or_(
+            Conversation.user1_id == user.id,
+            Conversation.user2_id == user.id
+        )
+    ).order_by(Conversation.last_message_at.desc()).all()
     
-    # Count unread messages
-    unread_count = 0
+    # Build conversation data with the "other user" and unread count
+    conversation_data = []
+    total_unread = 0
+    
     for conv in conversations:
-        unread_count += Message.query.filter(
+        # Determine who the "other user" is
+        other_user = conv.user2 if conv.user1_id == user.id else conv.user1
+        
+        # Count unread messages in this conversation
+        unread_count = Message.query.filter(
             Message.conversation_id == conv.id,
             Message.sender_id != user.id,
             Message.is_read == False
         ).count()
+        
+        total_unread += unread_count
+        
+        # Get last message
+        last_message = Message.query.filter_by(conversation_id=conv.id)\
+            .order_by(Message.created_at.desc()).first()
+        
+        conversation_data.append({
+            'conversation': conv,
+            'other_user': other_user,
+            'unread_count': unread_count,
+            'last_message': last_message
+        })
     
     return render_template('messages_inbox.html', 
-        conversations=conversations,
-        unread_count=unread_count
+        conversation_data=conversation_data,
+        unread_count=total_unread
     )
 
 
@@ -1496,7 +2134,7 @@ def view_conversation(conversation_id):
     user = User.query.get(session['user_id'])
     
     # Check authorization
-    if user.id not in [conversation.customer_id, conversation.seller_id]:
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('messages_inbox'))
     
@@ -1524,7 +2162,7 @@ def send_message(conversation_id):
     user = User.query.get(session['user_id'])
     
     # Check authorization
-    if user.id not in [conversation.customer_id, conversation.seller_id]:
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
     message_text = request.form.get('message_text', '').strip()
@@ -1564,10 +2202,13 @@ def start_conversation(shop_id):
     shop = Shop.query.get_or_404(shop_id)
     
     # Check if conversation already exists
-    existing = Conversation.query.filter_by(
-        customer_id=session['user_id'],
-        seller_id=shop.seller_id,
-        shop_id=shop_id
+    existing = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == session['user_id'], Conversation.user2_id == shop.seller_id),
+            db.and_(Conversation.user1_id == shop.seller_id, Conversation.user2_id == session['user_id'])
+        ),
+        Conversation.conversation_type == 'buyer_seller',
+        Conversation.shop_id == shop_id
     ).first()
     
     if existing:
@@ -1575,15 +2216,73 @@ def start_conversation(shop_id):
     
     # Create new conversation
     conversation = Conversation(
-        customer_id=session['user_id'],
-        seller_id=shop.seller_id,
-        shop_id=shop_id
+        user1_id=session['user_id'],
+        user2_id=shop.seller_id,
+        shop_id=shop_id,
+        conversation_type='buyer_seller'
     )
     
     db.session.add(conversation)
     db.session.commit()
     
     log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With shop {shop.name}')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
+@app.route('/messages/start-with-rider/<int:order_id>', methods=['POST'])
+@login_required
+def start_conversation_with_rider(order_id):
+    """Start conversation between buyer/seller and rider for an order"""
+    order = Order.query.get_or_404(order_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify user is buyer or seller of this order
+    if user.role == 'customer' and order.customer_id != user.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('index'))
+    
+    if user.role == 'seller' and order.shop.seller_id != user.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('index'))
+    
+    if not order.rider_id:
+        flash('No rider assigned to this order yet.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id) if user.role == 'customer' else url_for('seller_order_detail', order_id=order_id))
+    
+    # Determine conversation type
+    if user.role == 'customer':
+        conv_type = 'buyer_rider'
+        other_user_id = order.rider_id
+    else:  # seller
+        conv_type = 'seller_rider'
+        other_user_id = order.rider_id
+    
+    # Check if conversation already exists
+    existing = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == user.id, Conversation.user2_id == other_user_id),
+            db.and_(Conversation.user1_id == other_user_id, Conversation.user2_id == user.id)
+        ),
+        Conversation.conversation_type == conv_type,
+        Conversation.order_id == order_id
+    ).first()
+    
+    if existing:
+        return redirect(url_for('view_conversation', conversation_id=existing.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=user.id,
+        user2_id=other_user_id,
+        order_id=order_id,
+        conversation_type=conv_type
+    )
+    
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With rider for order {order.order_number}')
     
     return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
@@ -1595,7 +2294,7 @@ def check_new_messages(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    if user.id not in [conversation.customer_id, conversation.seller_id]:
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         return jsonify({'success': False}), 403
     
     last_message_id = request.args.get('last_id', 0, type=int)
@@ -1619,6 +2318,233 @@ def check_new_messages(conversation_id):
         'success': True,
         'messages': messages_data
     })
+
+
+# ==================== SUPPORT CHAT ROUTES ====================
+
+@app.route('/support/start', methods=['GET', 'POST'])
+@login_required
+def start_support_chat():
+    """User initiates a support chat"""
+    user = User.query.get(session['user_id'])
+    
+    # Check if user already has an active support conversation
+    existing_conv = Conversation.query.filter(
+        Conversation.conversation_type == 'user_support',
+        db.or_(Conversation.user1_id == user.id, Conversation.user2_id == user.id)
+    ).first()
+    
+    if existing_conv:
+        return redirect(url_for('support_conversation', conversation_id=existing_conv.id))
+    
+    # Find an available support agent
+    support_agent = User.query.filter_by(is_support_agent=True).first()
+    
+    if not support_agent:
+        flash('No support agents are currently available. Please try again later.', 'warning')
+        return redirect(request.referrer or url_for('customer_dashboard'))
+    
+    # Create new support conversation
+    conversation = Conversation(
+        user1_id=user.id,
+        user2_id=support_agent.id,
+        conversation_type='user_support'
+    )
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('SUPPORT_CHAT_STARTED', 'Conversation', conversation.id, f'User {user.full_name} started support chat')
+    
+    flash('Connected to support. How can we help you?', 'success')
+    return redirect(url_for('support_conversation', conversation_id=conversation.id))
+
+
+@app.route('/support/conversation/<int:conversation_id>')
+@login_required
+def support_conversation(conversation_id):
+    """View support conversation (for both users and agents)"""
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify access
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
+        flash('You do not have access to this conversation.', 'danger')
+        return redirect(url_for('customer_dashboard'))
+    
+    # Mark messages as read
+    Message.query.filter(
+        Message.conversation_id == conversation_id,
+        Message.sender_id != user.id,
+        Message.is_read == False
+    ).update({'is_read': True})
+    db.session.commit()
+    
+    # Get other user
+    other_user = conversation.user1 if conversation.user2_id == user.id else conversation.user2
+    
+    # Update last activity for support agents
+    if user.is_support_agent:
+        user.last_activity = datetime.utcnow()
+        db.session.commit()
+    
+    return render_template('support_conversation.html',
+        conversation=conversation,
+        other_user=other_user,
+        messages=conversation.messages,
+        now=datetime.utcnow
+    )
+
+
+@app.route('/support/send-message/<int:conversation_id>', methods=['POST'])
+@login_required
+def send_support_message(conversation_id):
+    """Send a message in support conversation"""
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify access
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
+        return jsonify({'success': False, 'error': 'Access denied'}), 403
+    
+    message_text = request.form.get('message_text', '').strip()
+    
+    if not message_text:
+        return jsonify({'success': False, 'error': 'Message cannot be empty'}), 400
+    
+    # Create message
+    message = Message(
+        conversation_id=conversation_id,
+        sender_id=user.id,
+        message_text=message_text
+    )
+    db.session.add(message)
+    
+    # Update conversation timestamp
+    conversation.last_message_at = datetime.utcnow()
+    db.session.commit()
+    
+    # Update last activity for support agents
+    if user.is_support_agent:
+        user.last_activity = datetime.utcnow()
+        db.session.commit()
+    
+    return jsonify({'success': True, 'message_id': message.id})
+
+
+@app.route('/support/dashboard')
+@login_required
+def support_dashboard():
+    """Support agent dashboard showing all support conversations"""
+    user = User.query.get(session['user_id'])
+    
+    if not user.is_support_agent and user.role != 'admin':
+        flash('You do not have access to the support dashboard.', 'danger')
+        return redirect(url_for('customer_dashboard'))
+    
+    # Get all support conversations
+    conversations = Conversation.query.filter_by(
+        conversation_type='user_support'
+    ).order_by(Conversation.last_message_at.desc()).all()
+    
+    # Get unread counts for each conversation
+    conv_data = []
+    for conv in conversations:
+        user_info = conv.user1 if conv.user1_id != user.id else conv.user2
+        if conv.user2.is_support_agent or conv.user2.role == 'admin':
+            user_info = conv.user1
+        
+        unread_count = Message.query.filter(
+            Message.conversation_id == conv.id,
+            Message.sender_id != user.id,
+            Message.is_read == False
+        ).count()
+        
+        last_msg = conv.messages[-1] if conv.messages else None
+        
+        conv_data.append({
+            'conversation': conv,
+            'user': user_info,
+            'unread_count': unread_count,
+            'last_message': last_msg
+        })
+    
+    # Update last activity
+    user.last_activity = datetime.utcnow()
+    db.session.commit()
+    
+    # Get all support agents for status display
+    support_agents = User.query.filter_by(is_support_agent=True).all()
+    
+    # Calculate active agents (last activity within 5 minutes)
+    now = datetime.utcnow()
+    active_agents_count = sum(
+        1 for agent in support_agents 
+        if agent.last_activity and (now - agent.last_activity).total_seconds() < 300
+    )
+    
+    return render_template('support_dashboard.html',
+        conversations=conv_data,
+        support_agents=support_agents,
+        active_agents_count=active_agents_count,
+        now=now
+    )
+
+
+@app.route('/support/mark-read/<int:conversation_id>', methods=['POST'])
+@login_required
+def mark_support_read(conversation_id):
+    """Mark all messages in conversation as read"""
+    conversation = Conversation.query.get_or_404(conversation_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify access
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
+        return jsonify({'success': False}), 403
+    
+    Message.query.filter(
+        Message.conversation_id == conversation_id,
+        Message.sender_id != user.id,
+        Message.is_read == False
+    ).update({'is_read': True})
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+
+@app.route('/admin/manage-support-agents')
+@login_required
+@role_required('admin')
+def manage_support_agents():
+    """Admin page to manage support agents"""
+    support_agents = User.query.filter_by(is_support_agent=True).all()
+    all_users = User.query.filter(User.role != 'admin').order_by(User.full_name).all()
+    
+    return render_template('admin_support_agents.html',
+        support_agents=support_agents,
+        all_users=all_users
+    )
+
+
+@app.route('/admin/toggle-support-agent/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def toggle_support_agent(user_id):
+    """Toggle support agent status for a user"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot modify admin users.', 'danger')
+        return redirect(url_for('manage_support_agents'))
+    
+    user.is_support_agent = not user.is_support_agent
+    db.session.commit()
+    
+    action = 'granted' if user.is_support_agent else 'revoked'
+    flash(f'Support agent access {action} for {user.full_name}.', 'success')
+    log_action('SUPPORT_AGENT_TOGGLE', 'User', user.id, f'Support agent status: {user.is_support_agent}')
+    
+    return redirect(url_for('manage_support_agents'))
+
 
 @app.route('/admin/logs')
 @login_required
@@ -1745,6 +2671,16 @@ def create_tables():
         
         db.session.commit()
         app.tables_created = True
+
+
+@app.route('/api/calabarzon-addresses')
+def get_calabarzon_addresses():
+    """API endpoint to get CALABARZON address data"""
+    import json
+    filepath = os.path.join(app.static_folder, 'calabarzon_addresses.json')
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    return jsonify(data)
 
 
 if __name__ == '__main__':

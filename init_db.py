@@ -31,6 +31,25 @@ def init_database():
             print("✅ Admin created: admin@epicuremart.com / admin123")
         else:
             print("ℹ️  Admin already exists")
+            
+            
+            print("\n👤 Creating support user...")
+        support = User.query.filter_by(email='support@epicuremart.com').first()
+        if not support:
+            support = User(
+                email='support@epicuremart.com',
+                role='admin',
+                full_name='System support',
+                phone='+1234567890',
+                is_verified=True,
+                is_approved=True,
+                is_support_agent=True
+            )
+            support.set_password('support123')
+            db.session.add(support)
+            print("✅ support created: support@epicuremart.com / support123")
+        else:
+            print("ℹ️  support already exists")
         
         # Create Categories
         print("\n📦 Creating categories...")

@@ -1,0 +1,125 @@
+{
+  "region": "CALABARZON",
+  "provinces": {
+    "Cavite": {
+      "municipalities": {
+        "Dasmarinas": {
+          "cities": ["Dasmarinas City"],
+          "barangays": ["Salawag", "Paliparan", "Langkaan", "Sampaloc", "Emmanuel", "San Agustin", "Victoria Reyes"]
+        },
+        "Imus": {
+          "cities": ["Imus City"],
+          "barangays": ["Alapan", "Anabu", "Bayan Luma", "Bucandala", "Carsadang Bago", "Malagasang", "Tanzang Luma"]
+        },
+        "Bacoor": {
+          "cities": ["Bacoor City"],
+          "barangays": ["Alima", "Aniban", "Banalo", "Digman", "Habay", "Molino", "Niog", "Panapaan", "Queens Row"]
+        },
+        "General Trias": {
+          "cities": ["General Trias City"],
+          "barangays": ["Alingaro", "Arnaldo", "Bacao", "Biclatan", "Gov. Ferrer", "Javalera", "Manggahan", "Navarro"]
+        },
+        "Tagaytay": {
+          "cities": ["Tagaytay City"],
+          "barangays": ["Asisan", "Bagong Tubig", "Kaybagal", "Mag-Asawang Ilat", "Maharlika", "Maitim", "Neogan", "Tolentino"]
+        }
+      }
+    },
+    "Laguna": {
+      "municipalities": {
+        "Calamba": {
+          "cities": ["Calamba City"],
+          "barangays": ["Barandal", "Banlic", "Bucal", "Canlubang", "Halang", "Makiling", "Pansol", "Real", "Turbina"]
+        },
+        "San Pedro": {
+          "cities": ["San Pedro City"],
+          "barangays": ["Bagong Silang", "Cuyab", "Landayan", "Magsaysay", "Nueva", "Poblacion", "Rosario", "San Antonio"]
+        },
+        "Binan": {
+          "cities": ["Binan City"],
+          "barangays": ["Biñan", "Canlalay", "Casile", "Langkiwa", "Loma", "Malaban", "Malamig", "Santo Domingo"]
+        },
+        "Santa Rosa": {
+          "cities": ["Santa Rosa City"],
+          "barangays": ["Aplaya", "Balibago", "Don Jose", "Ibaba", "Macabling", "Malusak", "Pulong Santa Cruz", "Tagapo"]
+        },
+        "Cabuyao": {
+          "cities": ["Cabuyao City"],
+          "barangays": ["Banay-Banay", "Banlic", "Butong", "Mamatid", "Marinig", "Niugan", "Poblacion", "San Isidro"]
+        }
+      }
+    },
+    "Batangas": {
+      "municipalities": {
+        "Batangas City": {
+          "cities": ["Batangas City"],
+          "barangays": ["Alangilan", "Balagtas", "Banaba", "Bolbok", "Calicanto", "Kumintang", "Libjo", "Pallocan", "Santa Rita"]
+        },
+        "Lipa": {
+          "cities": ["Lipa City"],
+          "barangays": ["Anilao", "Antipolo", "Bagong Pook", "Banay-Banay", "Bulacnin", "Malitlit", "Marauoy", "Pusil", "Tibig"]
+        },
+        "Tanauan": {
+          "cities": ["Tanauan City"],
+          "barangays": ["Altura", "Balele", "Banjo", "Boot", "Darasa", "Gonzales", "Hidalgo", "Natatas", "Sambat"]
+        },
+        "Santo Tomas": {
+          "cities": ["Santo Tomas"],
+          "barangays": ["Barangay 1", "Barangay 2", "Barangay 3", "San Agustin", "San Antonio", "San Felix", "San Fernando"]
+        },
+        "Nasugbu": {
+          "cities": ["Nasugbu"],
+          "barangays": ["Aga", "Balaytigui", "Banilad", "Bilaran", "Bukana", "Kalayo", "Mataas na Pulo", "Natipuan"]
+        }
+      }
+    },
+    "Rizal": {
+      "municipalities": {
+        "Antipolo": {
+          "cities": ["Antipolo City"],
+          "barangays": ["Bagong Nayon", "Beverly Hills", "Calawis", "Dalig", "Dela Paz", "Inarawan", "Mambugan", "San Jose"]
+        },
+        "Cainta": {
+          "cities": ["Cainta"],
+          "barangays": ["San Andres", "San Isidro", "San Juan", "San Roque", "Santo Domingo", "Santo Niño"]
+        },
+        "Taytay": {
+          "cities": ["Taytay"],
+          "barangays": ["Dolores", "Muzon", "San Isidro", "San Juan", "Santa Ana", "Tikay"]
+        },
+        "Binangonan": {
+          "cities": ["Binangonan"],
+          "barangays": ["Bangad", "Bilibiran", "Boso-Boso", "Kalawaan", "Kalinawan", "Layuhan", "Malakaban"]
+        },
+        "Rodriguez": {
+          "cities": ["Rodriguez"],
+          "barangays": ["Balite", "Burgos", "Geronimo", "Macabud", "Manggahan", "San Isidro", "San Jose"]
+        }
+      }
+    },
+    "Quezon": {
+      "municipalities": {
+        "Lucena": {
+          "cities": ["Lucena City"],
+          "barangays": ["Barangay 1", "Barangay 2", "Cotta", "Dalahican", "Ibabang Dupay", "Ilayang Dupay", "Market View"]
+        },
+        "Tayabas": {
+          "cities": ["Tayabas City"],
+          "barangays": ["Alitao", "Angeles", "Ayaas", "Baguio", "Banilad", "Bukal", "Domoit", "Isabang"]
+        },
+        "Sariaya": {
+          "cities": ["Sariaya"],
+          "barangays": ["Antipolo", "Barangay 1", "Barangay 2", "Gibanga", "Lutucan", "Manggalang", "Sampaloc"]
+        },
+        "Candelaria": {
+          "cities": ["Candelaria"],
+          "barangays": ["Buenavista", "Bukal Norte", "Bukal Sur", "Kinatihan", "Malabanban", "Mangilag", "Masalukot"]
+        },
+        "Tiaong": {
+          "cities": ["Tiaong"],
+          "barangays": ["Anastacia", "Behia", "Bukal", "Cabatang", "Lalig", "Lagalag", "Lumingon", "San Isidro"]
+        }
+      }
+    }
+  }
+}
