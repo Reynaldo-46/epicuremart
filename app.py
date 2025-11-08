@@ -47,8 +47,10 @@ class User(db.Model):
     role = db.Column(db.Enum('admin', 'seller', 'customer', 'courier', 'rider'), nullable=False)
     is_verified = db.Column(db.Boolean, default=False)
     is_approved = db.Column(db.Boolean, default=True)  # Admin approval for sellers/couriers/riders
+    is_suspended = db.Column(db.Boolean, default=False)  # Admin can suspend accounts
     full_name = db.Column(db.String(100))
     phone = db.Column(db.String(20))
+    verification_code = db.Column(db.String(6))  # 6-digit verification code
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -109,9 +111,23 @@ class Address(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     label = db.Column(db.String(50))  # Home, Work, etc.
+    
+    # Philippine address fields
+    region = db.Column(db.String(100))
+    province = db.Column(db.String(100))
+    municipality = db.Column(db.String(100))
+    barangay = db.Column(db.String(100))
+    
+    # Optional detailed address fields
+    street = db.Column(db.String(200))
+    block = db.Column(db.String(50))
+    lot = db.Column(db.String(50))
+    
+    # Legacy fields (kept for backward compatibility)
     full_address = db.Column(db.Text, nullable=False)
     city = db.Column(db.String(100))
     postal_code = db.Column(db.String(20))
+    
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -137,6 +153,10 @@ class Order(db.Model):
     commission_rate = db.Column(Numeric(5, 2), default=5.00)  # 5% commission
     commission_amount = db.Column(Numeric(10, 2), default=0.00)
     seller_amount = db.Column(Numeric(10, 2), default=0.00)
+    
+    # Delivery earnings split
+    courier_earnings = db.Column(Numeric(10, 2), default=0.00)  # 60% of delivery fee
+    rider_earnings = db.Column(Numeric(10, 2), default=0.00)  # 40% of delivery fee
 
     # QR Tokens
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
@@ -226,6 +246,60 @@ class Message(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
+
+
+class CartItem(db.Model):
+    """Separate cart entries to support multiple transactions of same product"""
+    __tablename__ = 'cart_items'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='cart_items')
+    product = db.relationship('Product')
+
+
+class VerificationDocument(db.Model):
+    """Store verification documents for sellers, couriers, and riders"""
+    __tablename__ = 'verification_documents'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    document_type = db.Column(db.Enum(
+        'valid_id', 'business_permit', 'drivers_license', 'or_cr'
+    ), nullable=False)
+    file_path = db.Column(db.String(255), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='verification_documents')
+
+
+class VehicleInfo(db.Model):
+    """Store vehicle information for couriers and riders"""
+    __tablename__ = 'vehicle_info'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    vehicle_type = db.Column(db.String(50), nullable=False)  # motorcycle, car, van, etc.
+    plate_number = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='vehicle_info', uselist=False)
+
+
+class AdminMessage(db.Model):
+    """Messages between admin and other users"""
+    __tablename__ = 'admin_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    message_text = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', foreign_keys=[user_id], backref='received_admin_messages')
+    sender = db.relationship('User', foreign_keys=[sender_id])
+
     
 # ==================== HELPER FUNCTIONS ====================
 
@@ -362,37 +436,75 @@ def register():
         # Sellers, couriers, riders need admin approval
         is_approved = True if role == 'customer' else False
         
+        # Generate 6-digit verification code
+        import random
+        verification_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
         user = User(
             email=email,
             role=role,
             full_name=full_name,
             phone=phone,
-            is_approved=is_approved
+            is_approved=is_approved,
+            verification_code=verification_code
         )
         user.set_password(password)
         
         db.session.add(user)
         db.session.commit()
         
-        # Send verification email
-        verification_token = generate_qr_token(user.id, 'email_verify', expiry_hours=48)
-        verify_url = url_for('verify_email', token=verification_token, _external=True)
+        # Send verification code via email
         send_email(
             user.email,
             'Verify your Epicuremart account',
-            f'Click here to verify: {verify_url}'
+            f'Your verification code is: {verification_code}\n\nPlease enter this code to verify your account.\n\nThis code will expire in 48 hours.'
         )
         
         log_action('USER_REGISTERED', 'User', user.id, f'New {role} registered')
         
-        flash('Registration successful! Please check your email to verify your account.', 'success')
-        return redirect(url_for('login'))
+        flash('Registration successful! Please check your email for the verification code.', 'success')
+        return redirect(url_for('verify_email_code', user_id=user.id))
     
     return render_template('register.html')
 
 
+@app.route('/verify-email-code/<int:user_id>', methods=['GET', 'POST'])
+def verify_email_code(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if user.is_verified:
+        flash('Email already verified. Please log in.', 'info')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        code = request.form.get('code')
+        
+        if not user.verification_code:
+            flash('Verification code has expired. Please register again.', 'danger')
+            return redirect(url_for('register'))
+        
+        if code == user.verification_code:
+            user.is_verified = True
+            user.verification_code = None  # Clear the code after verification
+            db.session.commit()
+            log_action('EMAIL_VERIFIED', 'User', user.id)
+            
+            # Redirect to document upload for roles that need approval
+            if user.role in ['seller', 'courier', 'rider']:
+                flash('Email verified! Please upload your verification documents.', 'success')
+                return redirect(url_for('upload_verification_documents', user_id=user.id))
+            else:
+                flash('Email verified successfully! You can now log in.', 'success')
+                return redirect(url_for('login'))
+        else:
+            flash('Invalid verification code. Please try again.', 'danger')
+    
+    return render_template('verify_email_code.html', user=user)
+
+
 @app.route('/verify-email/<token>')
 def verify_email(token):
+    """Legacy token-based verification (kept for backward compatibility)"""
     payload = verify_qr_token(token)
     if not payload or payload.get('type') != 'email_verify':
         flash('Invalid or expired verification link.', 'danger')
@@ -408,6 +520,108 @@ def verify_email(token):
     return redirect(url_for('login'))
 
 
+@app.route('/upload-verification-documents/<int:user_id>', methods=['GET', 'POST'])
+def upload_verification_documents(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if not user.is_verified:
+        flash('Please verify your email first.', 'warning')
+        return redirect(url_for('verify_email_code', user_id=user_id))
+    
+    if user.is_approved:
+        flash('Your account is already approved.', 'info')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        # Handle file uploads based on role
+        uploaded_files = []
+        
+        if user.role == 'seller':
+            # Seller needs: Valid ID and Business Permit
+            valid_id = request.files.get('valid_id')
+            business_permit = request.files.get('business_permit')
+            
+            if valid_id and allowed_file(valid_id.filename):
+                filename = secure_filename(f"{user.id}_valid_id_{valid_id.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                valid_id.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='valid_id',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append('Valid ID')
+            
+            if business_permit and allowed_file(business_permit.filename):
+                filename = secure_filename(f"{user.id}_business_permit_{business_permit.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                business_permit.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='business_permit',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append('Business Permit')
+        
+        elif user.role in ['courier', 'rider']:
+            # Courier/Rider needs: Driver's License and OR/CR
+            drivers_license = request.files.get('drivers_license')
+            or_cr = request.files.get('or_cr')
+            vehicle_type = request.form.get('vehicle_type')
+            plate_number = request.form.get('plate_number')
+            
+            if drivers_license and allowed_file(drivers_license.filename):
+                filename = secure_filename(f"{user.id}_drivers_license_{drivers_license.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                drivers_license.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='drivers_license',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append("Driver's License")
+            
+            if or_cr and allowed_file(or_cr.filename):
+                filename = secure_filename(f"{user.id}_or_cr_{or_cr.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                or_cr.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='or_cr',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append('OR/CR')
+            
+            # Save vehicle info
+            if vehicle_type and plate_number:
+                vehicle_info = VehicleInfo(
+                    user_id=user.id,
+                    vehicle_type=vehicle_type,
+                    plate_number=plate_number
+                )
+                db.session.add(vehicle_info)
+                uploaded_files.append('Vehicle Information')
+        
+        if uploaded_files:
+            db.session.commit()
+            log_action('VERIFICATION_DOCS_UPLOADED', 'User', user.id, 
+                      f"Uploaded: {', '.join(uploaded_files)}")
+            flash(f'Documents uploaded successfully! Your account is pending admin approval.', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash('Please upload all required documents.', 'danger')
+    
+    return render_template('upload_verification_documents.html', user=user)
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -419,6 +633,10 @@ def login():
         if user and user.check_password(password):
             if not user.is_verified:
                 flash('Please verify your email before logging in.', 'warning')
+                return redirect(url_for('login'))
+            
+            if user.is_suspended:
+                flash('Your account has been suspended. Please contact support.', 'danger')
                 return redirect(url_for('login'))
             
             session['user_id'] = user.id
@@ -487,22 +705,38 @@ def browse():
 @app.route('/cart')
 @login_required
 def view_cart():
-    cart = session.get('cart', {})
-    cart_items = []
+    # Get cart items from database
+    cart_items = CartItem.query.filter_by(user_id=session['user_id']).all()
     total = 0
+    items_data = []
+    stock_errors = []
     
-    for product_id, quantity in cart.items():
-        product = Product.query.get(int(product_id))
-        if product:
-            subtotal = float(product.price) * quantity
-            cart_items.append({
-                'product': product,
-                'quantity': quantity,
-                'subtotal': subtotal
+    for cart_item in cart_items:
+        if cart_item.product:
+            subtotal = float(cart_item.product.price) * cart_item.quantity
+            
+            # Check if quantity exceeds available stock
+            exceeds_stock = cart_item.quantity > cart_item.product.stock
+            if exceeds_stock:
+                stock_errors.append({
+                    'product_name': cart_item.product.name,
+                    'requested': cart_item.quantity,
+                    'available': cart_item.product.stock
+                })
+            
+            items_data.append({
+                'id': cart_item.id,
+                'product': cart_item.product,
+                'quantity': cart_item.quantity,
+                'subtotal': subtotal,
+                'exceeds_stock': exceeds_stock
             })
             total += subtotal
     
-    return render_template('cart.html', cart_items=cart_items, total=total)
+    return render_template('cart.html', 
+                         cart_items=items_data, 
+                         total=total,
+                         stock_errors=stock_errors)
 
 
 @app.route('/cart/add/<int:product_id>', methods=['POST'])
@@ -511,27 +745,91 @@ def add_to_cart(product_id):
     product = Product.query.get_or_404(product_id)
     quantity = int(request.form.get('quantity', 1))
     
-    cart = session.get('cart', {})
+    # Validate stock availability
+    if quantity > product.stock:
+        flash(f'Cannot add {quantity} units. Only {product.stock} available in stock.', 'danger')
+        return redirect(url_for('product_detail', product_id=product_id))
     
-    if str(product_id) in cart:
-        cart[str(product_id)] += quantity
-    else:
-        cart[str(product_id)] = quantity
+    if quantity < 1:
+        flash('Quantity must be at least 1.', 'danger')
+        return redirect(url_for('product_detail', product_id=product_id))
     
-    session['cart'] = cart
+    # Check total cart quantity for this product
+    existing_cart_items = CartItem.query.filter_by(
+        user_id=session['user_id'],
+        product_id=product_id
+    ).all()
+    
+    total_in_cart = sum(item.quantity for item in existing_cart_items)
+    
+    if total_in_cart + quantity > product.stock:
+        flash(f'Cannot add {quantity} more units. You already have {total_in_cart} in cart. Only {product.stock} available total.', 'warning')
+        return redirect(url_for('product_detail', product_id=product_id))
+    
+    # Create new cart item (separate entry for each add)
+    cart_item = CartItem(
+        user_id=session['user_id'],
+        product_id=product_id,
+        quantity=quantity
+    )
+    
+    db.session.add(cart_item)
+    db.session.commit()
+    
     flash(f'{product.name} added to cart!', 'success')
     return redirect(url_for('browse'))
 
 
-@app.route('/cart/remove/<int:product_id>')
+@app.route('/cart/remove/<int:cart_item_id>')
 @login_required
-def remove_from_cart(product_id):
-    cart = session.get('cart', {})
-    if str(product_id) in cart:
-        del cart[str(product_id)]
-        session['cart'] = cart
+def remove_from_cart(cart_item_id):
+    cart_item = CartItem.query.filter_by(
+        id=cart_item_id,
+        user_id=session['user_id']
+    ).first()
+    
+    if cart_item:
+        db.session.delete(cart_item)
+        db.session.commit()
         flash('Item removed from cart.', 'info')
+    
     return redirect(url_for('view_cart'))
+
+
+@app.route('/cart/update/<int:cart_item_id>', methods=['POST'])
+@login_required
+def update_cart_item(cart_item_id):
+    cart_item = CartItem.query.filter_by(
+        id=cart_item_id,
+        user_id=session['user_id']
+    ).first_or_404()
+    
+    new_quantity = int(request.form.get('quantity', 1))
+    
+    # Validate stock
+    if new_quantity > cart_item.product.stock:
+        return jsonify({
+            'success': False,
+            'message': f'Only {cart_item.product.stock} units available in stock.'
+        }), 400
+    
+    if new_quantity < 1:
+        return jsonify({
+            'success': False,
+            'message': 'Quantity must be at least 1.'
+        }), 400
+    
+    cart_item.quantity = new_quantity
+    db.session.commit()
+    
+    subtotal = float(cart_item.product.price) * new_quantity
+    
+    return jsonify({
+        'success': True,
+        'subtotal': subtotal,
+        'message': 'Cart updated successfully.'
+    })
+
 
 @app.route('/customer/address/add', methods=['POST'])
 @login_required
@@ -636,47 +934,85 @@ def delete_address(address_id):
 @login_required
 @role_required('customer')
 def checkout():
-    cart = session.get('cart', {})
-    if not cart:
+    # Get cart items from database
+    cart_items = CartItem.query.filter_by(user_id=session['user_id']).all()
+    
+    if not cart_items:
         flash('Your cart is empty.', 'warning')
         return redirect(url_for('browse'))
+    
+    # Validate stock for all cart items
+    stock_errors = []
+    for cart_item in cart_items:
+        if cart_item.quantity > cart_item.product.stock:
+            stock_errors.append({
+                'product_name': cart_item.product.name,
+                'requested': cart_item.quantity,
+                'available': cart_item.product.stock
+            })
+    
+    if stock_errors:
+        flash('One or more items exceed available stock. Please adjust your cart before checking out.', 'danger')
+        return redirect(url_for('view_cart'))
     
     addresses = Address.query.filter_by(user_id=session['user_id']).all()
     
     if request.method == 'POST':
         address_id = request.form.get('address_id')
         
+        # Revalidate stock before creating order
+        for cart_item in cart_items:
+            if cart_item.quantity > cart_item.product.stock:
+                flash(f'{cart_item.product.name} stock changed. Please review your cart.', 'danger')
+                return redirect(url_for('view_cart'))
+        
         # Group items by shop
         shop_orders = {}
-        for product_id, quantity in cart.items():
-            product = Product.query.get(int(product_id))
+        for cart_item in cart_items:
+            product = cart_item.product
             if product:
                 if product.shop_id not in shop_orders:
                     shop_orders[product.shop_id] = []
-                shop_orders[product.shop_id].append((product, quantity))
+                shop_orders[product.shop_id].append((product, cart_item.quantity))
         
         # Create order for each shop
         for shop_id, items in shop_orders.items():
-            total = sum([float(p.price) * q for p, q in items])
+            subtotal = sum([float(p.price) * q for p, q in items])
             
-            commission = total * 0.05
-            seller_amount = total - commission
+            # Calculate commission (5% per transaction, not per product)
+            commission = subtotal * 0.05
+            seller_amount = subtotal - commission
+            
+            # Get delivery fee (if applicable)
+            delivery_fee = 0.00  # You can add delivery fee logic here
+            total = subtotal + delivery_fee
+            
+            # Calculate courier/rider earnings split
+            courier_earnings = delivery_fee * 0.60  # 60% to courier
+            rider_earnings = delivery_fee * 0.40    # 40% to rider
             
             order = Order(
                 order_number=generate_order_number(),
                 customer_id=session['user_id'],
                 shop_id=shop_id,
                 delivery_address_id=address_id,
+                subtotal=subtotal,
+                delivery_fee=delivery_fee,
                 total_amount=total,
                 commission_rate=5.00,
                 commission_amount=commission,
                 seller_amount=seller_amount,
+                courier_earnings=courier_earnings,
+                rider_earnings=rider_earnings,
                 status='PENDING_PAYMENT'
             )
             db.session.add(order)
             db.session.flush()
             
             for product, quantity in items:
+                # Reduce stock
+                product.stock -= quantity
+                
                 order_item = OrderItem(
                     order_id=order.id,
                     product_id=product.id,
@@ -687,8 +1023,10 @@ def checkout():
             
             log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
         
+        # Clear cart after successful checkout
+        CartItem.query.filter_by(user_id=session['user_id']).delete()
+        
         db.session.commit()
-        session['cart'] = {}
         
         # Send confirmation email
         user = User.query.get(session['user_id'])
@@ -1089,6 +1427,47 @@ def mark_order_ready(order_id):
     return redirect(url_for('seller_order_detail', order_id=order_id))
 
 
+@app.route('/seller/sales-report')
+@login_required
+@role_required('seller')
+def seller_sales_report():
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        return redirect(url_for('create_shop'))
+    
+    # Get all completed orders for this shop
+    completed_orders = Order.query.filter_by(
+        shop_id=user.shop.id,
+        status='DELIVERED'
+    ).order_by(Order.created_at.desc()).all()
+    
+    # Calculate totals
+    total_sales = sum([float(order.subtotal) for order in completed_orders])
+    total_commission = sum([float(order.commission_amount) for order in completed_orders])
+    total_earnings = sum([float(order.seller_amount) for order in completed_orders])
+    
+    # Group orders by month for analytics
+    from collections import defaultdict
+    monthly_data = defaultdict(lambda: {'sales': 0, 'commission': 0, 'earnings': 0, 'count': 0})
+    
+    for order in completed_orders:
+        month_key = order.created_at.strftime('%Y-%m')
+        monthly_data[month_key]['sales'] += float(order.subtotal)
+        monthly_data[month_key]['commission'] += float(order.commission_amount)
+        monthly_data[month_key]['earnings'] += float(order.seller_amount)
+        monthly_data[month_key]['count'] += 1
+    
+    return render_template('seller_sales_report.html',
+        shop=user.shop,
+        completed_orders=completed_orders,
+        total_sales=total_sales,
+        total_commission=total_commission,
+        total_earnings=total_earnings,
+        monthly_data=dict(monthly_data)
+    )
+
+
 # ==================== COURIER ROUTES ====================
 
 @app.route('/courier/dashboard')
@@ -1104,9 +1483,29 @@ def courier_dashboard():
         .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Calculate earnings from completed deliveries
+    completed_orders = Order.query.filter_by(
+        courier_id=session['user_id'],
+        status='DELIVERED'
+    ).all()
+    
+    total_deliveries = len(completed_orders)
+    total_earnings = sum([float(order.courier_earnings) for order in completed_orders])
+    
+    # Monthly earnings
+    from collections import defaultdict
+    monthly_earnings = defaultdict(float)
+    for order in completed_orders:
+        month_key = order.created_at.strftime('%Y-%m')
+        monthly_earnings[month_key] += float(order.courier_earnings)
+    
     return render_template('courier_dashboard.html', 
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        total_earnings=total_earnings,
+        monthly_earnings=dict(monthly_earnings),
+        completed_orders=completed_orders[:10]  # Last 10 completed
     )
 
 
@@ -1192,9 +1591,29 @@ def rider_dashboard():
         .filter(Order.status.in_(['OUT_FOR_DELIVERY']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Calculate earnings from completed deliveries
+    completed_orders = Order.query.filter_by(
+        rider_id=session['user_id'],
+        status='DELIVERED'
+    ).all()
+    
+    total_deliveries = len(completed_orders)
+    total_earnings = sum([float(order.rider_earnings) for order in completed_orders])
+    
+    # Monthly earnings
+    from collections import defaultdict
+    monthly_earnings = defaultdict(float)
+    for order in completed_orders:
+        month_key = order.created_at.strftime('%Y-%m')
+        monthly_earnings[month_key] += float(order.rider_earnings)
+    
     return render_template('rider_dashboard.html',
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        total_earnings=total_earnings,
+        monthly_earnings=dict(monthly_earnings),
+        completed_orders=completed_orders[:10]  # Last 10 completed
     )
 
 
@@ -1370,12 +1789,83 @@ def reject_user(user_id):
     return redirect(url_for('admin_approvals'))
 
 
+@app.route('/admin/document/<int:doc_id>')
+@login_required
+@role_required('admin')
+def view_document(doc_id):
+    """View uploaded verification document"""
+    from flask import send_from_directory
+    doc = VerificationDocument.query.get_or_404(doc_id)
+    return send_from_directory(app.config['UPLOAD_FOLDER'], doc.file_path)
+
+
 @app.route('/admin/users')
 @login_required
 @role_required('admin')
 def admin_users():
-    users = User.query.order_by(User.created_at.desc()).all()
+    users = User.query.filter(User.role != 'admin').order_by(User.created_at.desc()).all()
     return render_template('admin_users.html', users=users)
+
+
+@app.route('/admin/user/<int:user_id>/suspend', methods=['POST'])
+@login_required
+@role_required('admin')
+def suspend_user(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot suspend admin users.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    user.is_suspended = not user.is_suspended
+    db.session.commit()
+    
+    action = 'SUSPENDED' if user.is_suspended else 'UNSUSPENDED'
+    log_action(f'USER_{action}', 'User', user.id, f'{action} {user.role}: {user.email}')
+    
+    status = 'suspended' if user.is_suspended else 'unsuspended'
+    flash(f'User account {status} successfully!', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/<int:user_id>/delete', methods=['POST'])
+@login_required
+@role_required('admin')
+def delete_user(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot delete admin users.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    log_action('USER_DELETED', 'User', user.id, f'Deleted {user.role}: {user.email}')
+    
+    db.session.delete(user)
+    db.session.commit()
+    
+    flash('User account deleted successfully!', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/<int:user_id>/toggle-approval', methods=['POST'])
+@login_required
+@role_required('admin')
+def toggle_user_approval(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin' or user.role == 'customer':
+        flash('Cannot change approval status for this user type.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    user.is_approved = not user.is_approved
+    db.session.commit()
+    
+    status = 'approved' if user.is_approved else 'revoked'
+    log_action(f'USER_APPROVAL_{status.upper()}', 'User', user.id, 
+              f'Approval {status} for {user.role}: {user.email}')
+    
+    flash(f'User approval status changed to: {status}', 'success')
+    return redirect(url_for('admin_users'))
 
 
 @app.route('/admin/categories', methods=['GET', 'POST'])
@@ -1708,6 +2198,40 @@ def api_verify_qr():
         'status': order.status,
         'type': payload['type']
     })
+
+
+# ==================== CONTEXT PROCESSORS ====================
+
+@app.context_processor
+def inject_cart_count():
+    """Make cart count and message count available in all templates"""
+    cart_count = 0
+    unread_messages = 0
+    
+    if 'user_id' in session:
+        # Cart transaction count (for customers)
+        if session.get('role') == 'customer':
+            cart_count = CartItem.query.filter_by(user_id=session['user_id']).count()
+        
+        # Unread message count (for all roles)
+        # Count unread messages in conversations where user is not the sender
+        unread_in_conversations = db.session.query(Message).join(Conversation).filter(
+            db.or_(
+                db.and_(Conversation.customer_id == session['user_id'], Message.sender_id != session['user_id']),
+                db.and_(Conversation.seller_id == session['user_id'], Message.sender_id != session['user_id'])
+            ),
+            Message.is_read == False
+        ).count()
+        
+        # Count unread admin messages
+        unread_admin_messages = AdminMessage.query.filter_by(
+            user_id=session['user_id'],
+            is_read=False
+        ).count()
+        
+        unread_messages = unread_in_conversations + unread_admin_messages
+    
+    return dict(cart_count=cart_count, unread_messages=unread_messages)
 
 
 # ==================== INITIALIZE DATABASE ====================

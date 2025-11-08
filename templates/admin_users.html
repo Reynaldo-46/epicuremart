@@ -17,11 +17,12 @@
                             <th>Status</th>
                             <th>Verified</th>
                             <th>Registered</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for user in users %}
-                        <tr>
+                        <tr {% if user.is_suspended %}class="table-secondary"{% endif %}>
                             <td>{{ user.id }}</td>
                             <td>{{ user.full_name }}</td>
                             <td>{{ user.email }}</td>
@@ -36,7 +37,9 @@
                                 </span>
                             </td>
                             <td>
-                                {% if user.is_approved %}
+                                {% if user.is_suspended %}
+                                <span class="badge bg-dark">Suspended</span>
+                                {% elif user.is_approved %}
                                 <span class="badge bg-success">Approved</span>
                                 {% else %}
                                 <span class="badge bg-warning">Pending</span>
@@ -50,6 +53,38 @@
                                 {% endif %}
                             </td>
                             <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <div class="btn-group" role="group">
+                                    <!-- Suspend/Unsuspend -->
+                                    <form method="POST" action="{{ url_for('suspend_user', user_id=user.id) }}" 
+                                          style="display:inline;">
+                                        <button type="submit" class="btn btn-sm btn-warning" 
+                                                title="{% if user.is_suspended %}Unsuspend{% else %}Suspend{% endif %}">
+                                            <i class="fas fa-{% if user.is_suspended %}play{% else %}pause{% endif %}"></i>
+                                        </button>
+                                    </form>
+                                    
+                                    <!-- Toggle Approval (for seller/courier/rider only) -->
+                                    {% if user.role in ['seller', 'courier', 'rider'] %}
+                                    <form method="POST" action="{{ url_for('toggle_user_approval', user_id=user.id) }}" 
+                                          style="display:inline;">
+                                        <button type="submit" class="btn btn-sm btn-info" 
+                                                title="Toggle Approval">
+                                            <i class="fas fa-toggle-{% if user.is_approved %}on{% else %}off{% endif %}"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                    
+                                    <!-- Delete -->
+                                    <form method="POST" action="{{ url_for('delete_user', user_id=user.id) }}" 
+                                          onsubmit="return confirm('Are you sure you want to delete this user? This action cannot be undone.');"
+                                          style="display:inline;">
+                                        <button type="submit" class="btn btn-sm btn-danger" title="Delete">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

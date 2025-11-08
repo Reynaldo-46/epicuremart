@@ -21,8 +21,45 @@
                             {% endif %}">
                             {{ user.role|capitalize }}
                         </span>
+                        {% if not user.is_verified %}
+                        <span class="badge bg-secondary">Not Verified</span>
+                        {% endif %}
                     </p>
                     <p class="small text-muted">Registered: {{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                    
+                    <!-- Verification Documents -->
+                    {% if user.verification_documents %}
+                    <div class="mb-3">
+                        <strong>Documents:</strong>
+                        <ul class="list-unstyled mt-2">
+                            {% for doc in user.verification_documents %}
+                            <li>
+                                <i class="fas fa-file-alt text-success"></i>
+                                {{ doc.document_type|replace('_', ' ')|title }}
+                                <a href="{{ url_for('view_document', doc_id=doc.id) }}" 
+                                   class="btn btn-sm btn-outline-primary" target="_blank">
+                                    <i class="fas fa-eye"></i> View
+                                </a>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning py-2 mb-3">
+                        <small><i class="fas fa-exclamation-triangle"></i> No documents uploaded</small>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Vehicle Info for Courier/Rider -->
+                    {% if user.role in ['courier', 'rider'] and user.vehicle_info %}
+                    <div class="mb-3">
+                        <strong>Vehicle Info:</strong>
+                        <ul class="list-unstyled mt-2">
+                            <li><i class="fas fa-car"></i> {{ user.vehicle_info.vehicle_type|title }}</li>
+                            <li><i class="fas fa-id-card"></i> {{ user.vehicle_info.plate_number }}</li>
+                        </ul>
+                    </div>
+                    {% endif %}
                     
                     <div class="d-grid gap-2">
                         <form method="POST" action="{{ url_for('approve_user', user_id=user.id) }}" style="display:inline;">

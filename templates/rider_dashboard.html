@@ -4,6 +4,46 @@
 <div class="container">
     <h2 class="mb-4"><i class="fas fa-motorcycle"></i> Rider Dashboard</h2>
 
+    <!-- Earnings Summary -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Earnings</h5>
+                    <h2 class="mb-0">₱{{ "%.2f"|format(total_earnings) }}</h2>
+                    <small>From {{ total_deliveries }} deliveries</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Completed Deliveries</h5>
+                    <h2 class="mb-0">{{ total_deliveries }}</h2>
+                    <small>Total completed</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Active Deliveries</h5>
+                    <h2 class="mb-0">{{ my_orders|length }}</h2>
+                    <small>Out for delivery</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Earnings Info -->
+    <div class="alert alert-info mb-4">
+        <h5><i class="fas fa-info-circle"></i> Earnings Split</h5>
+        <p class="mb-0">
+            As a rider, you earn <strong>40% of the delivery fee</strong> (₱40 from a ₱100 delivery fee).
+            The courier who picked up from the seller earns the remaining 60%.
+        </p>
+    </div>
+
     <!-- Quick Actions -->
     <div class="row mb-4">
         <div class="col-12">
@@ -33,6 +73,8 @@
                             <th>Order #</th>
                             <th>Customer</th>
                             <th>Address</th>
+                            <th>Delivery Fee</th>
+                            <th>Your Share (40%)</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -46,6 +88,8 @@
                             <td>{{ order.delivery_address.full_address }}<br>
                                 <small>{{ order.delivery_address.city }}</small>
                             </td>
+                            <td>₱{{ "%.2f"|format(order.delivery_fee) }}</td>
+                            <td class="text-success fw-bold">₱{{ "%.2f"|format(order.rider_earnings) }}</td>
                             <td>
                                 <a href="{{ url_for('rider_confirm_delivery', order_id=order.id) }}" class="btn btn-sm btn-success">
                                     <i class="fas fa-check"></i> Confirm Delivery
@@ -63,7 +107,7 @@
     </div>
 
     <!-- Available Orders -->
-    <div class="card">
+    <div class="card mb-4">
         <div class="card-header">
             <h5 class="mb-0">Available from Couriers</h5>
         </div>
@@ -76,6 +120,8 @@
                             <th>Order #</th>
                             <th>Courier</th>
                             <th>Delivery Address</th>
+                            <th>Delivery Fee</th>
+                            <th>Your Share (40%)</th>
                             <th>Status</th>
                         </tr>
                     </thead>
@@ -85,6 +131,8 @@
                             <td><strong>{{ order.order_number }}</strong></td>
                             <td>{{ order.courier.full_name if order.courier else 'N/A' }}</td>
                             <td>{{ order.delivery_address.city }}</td>
+                            <td>₱{{ "%.2f"|format(order.delivery_fee) }}</td>
+                            <td class="text-success fw-bold">₱{{ "%.2f"|format(order.delivery_fee * 0.40) }}</td>
                             <td><span class="badge bg-info">{{ order.status.replace('_', ' ') }}</span></td>
                         </tr>
                         {% endfor %}
@@ -96,5 +144,40 @@
             {% endif %}
         </div>
     </div>
+
+    <!-- Recent Earnings -->
+    {% if completed_orders %}
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Recent Completed Deliveries</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Order #</th>
+                            <th>Date</th>
+                            <th>Customer</th>
+                            <th>Delivery Fee</th>
+                            <th>Your Earnings (40%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in completed_orders %}
+                        <tr>
+                            <td>{{ order.order_number }}</td>
+                            <td>{{ order.updated_at.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ order.customer.full_name }}</td>
+                            <td>₱{{ "%.2f"|format(order.delivery_fee) }}</td>
+                            <td class="text-success fw-bold">₱{{ "%.2f"|format(order.rider_earnings) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
