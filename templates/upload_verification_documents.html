@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center mt-5">
+        <div class="col-md-8">
+            <div class="card shadow-lg border-0">
+                <div class="card-body p-5">
+                    <div class="text-center mb-4">
+                        <div class="mb-3">
+                            <i class="fas fa-file-upload fa-3x" style="color: var(--primary);"></i>
+                        </div>
+                        <h2 class="fw-bold mb-2">Upload Verification Documents</h2>
+                        <p class="text-muted">Please upload the required documents for verification</p>
+                        <p class="fw-bold">{{ user.role|capitalize }} Registration</p>
+                    </div>
+                    
+                    <form method="POST" enctype="multipart/form-data">
+                        {% if user.role == 'seller' %}
+                        <div class="mb-4">
+                            <label class="form-label">Valid ID (Government-issued) *</label>
+                            <input type="file" name="valid_id" class="form-control" 
+                                   accept="image/*,.pdf" required>
+                            <small class="form-text text-muted">
+                                Upload a clear photo of your valid government-issued ID
+                            </small>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="form-label">Business Permit *</label>
+                            <input type="file" name="business_permit" class="form-control" 
+                                   accept="image/*,.pdf" required>
+                            <small class="form-text text-muted">
+                                Upload your valid business permit or DTI registration
+                            </small>
+                        </div>
+                        
+                        {% elif user.role in ['courier', 'rider'] %}
+                        <div class="mb-4">
+                            <label class="form-label">Driver's License *</label>
+                            <input type="file" name="drivers_license" class="form-control" 
+                                   accept="image/*,.pdf" required>
+                            <small class="form-text text-muted">
+                                Upload a clear photo of your valid driver's license
+                            </small>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="form-label">OR/CR (Official Receipt/Certificate of Registration) *</label>
+                            <input type="file" name="or_cr" class="form-control" 
+                                   accept="image/*,.pdf" required>
+                            <small class="form-text text-muted">
+                                Upload your vehicle's OR/CR
+                            </small>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <label class="form-label">Vehicle Type *</label>
+                                <select name="vehicle_type" class="form-select" required>
+                                    <option value="">Select vehicle type</option>
+                                    <option value="motorcycle">Motorcycle</option>
+                                    <option value="tricycle">Tricycle</option>
+                                    <option value="car">Car</option>
+                                    <option value="van">Van</option>
+                                    <option value="truck">Truck</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <label class="form-label">Plate Number *</label>
+                                <input type="text" name="plate_number" class="form-control" 
+                                       placeholder="ABC-1234" required>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Note:</strong> After submitting your documents, your account will be 
+                            reviewed by our admin team. You will receive an email notification once approved.
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100 btn-lg mb-3">
+                            <i class="fas fa-upload me-2"></i>Submit Documents
+                        </button>
+                    </form>
+                    
+                    <div class="text-center">
+                        <p class="text-muted mb-0">
+                            <a href="{{ url_for('login') }}" class="fw-bold text-decoration-none">
+                                Skip for now (upload later)
+                            </a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

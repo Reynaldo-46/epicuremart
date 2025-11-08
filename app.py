@@ -488,8 +488,14 @@ def verify_email_code(user_id):
             user.verification_code = None  # Clear the code after verification
             db.session.commit()
             log_action('EMAIL_VERIFIED', 'User', user.id)
-            flash('Email verified successfully! You can now log in.', 'success')
-            return redirect(url_for('login'))
+            
+            # Redirect to document upload for roles that need approval
+            if user.role in ['seller', 'courier', 'rider']:
+                flash('Email verified! Please upload your verification documents.', 'success')
+                return redirect(url_for('upload_verification_documents', user_id=user.id))
+            else:
+                flash('Email verified successfully! You can now log in.', 'success')
+                return redirect(url_for('login'))
         else:
             flash('Invalid verification code. Please try again.', 'danger')
     
@@ -514,6 +520,108 @@ def verify_email(token):
     return redirect(url_for('login'))
 
 
+@app.route('/upload-verification-documents/<int:user_id>', methods=['GET', 'POST'])
+def upload_verification_documents(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if not user.is_verified:
+        flash('Please verify your email first.', 'warning')
+        return redirect(url_for('verify_email_code', user_id=user_id))
+    
+    if user.is_approved:
+        flash('Your account is already approved.', 'info')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        # Handle file uploads based on role
+        uploaded_files = []
+        
+        if user.role == 'seller':
+            # Seller needs: Valid ID and Business Permit
+            valid_id = request.files.get('valid_id')
+            business_permit = request.files.get('business_permit')
+            
+            if valid_id and allowed_file(valid_id.filename):
+                filename = secure_filename(f"{user.id}_valid_id_{valid_id.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                valid_id.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='valid_id',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append('Valid ID')
+            
+            if business_permit and allowed_file(business_permit.filename):
+                filename = secure_filename(f"{user.id}_business_permit_{business_permit.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                business_permit.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='business_permit',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append('Business Permit')
+        
+        elif user.role in ['courier', 'rider']:
+            # Courier/Rider needs: Driver's License and OR/CR
+            drivers_license = request.files.get('drivers_license')
+            or_cr = request.files.get('or_cr')
+            vehicle_type = request.form.get('vehicle_type')
+            plate_number = request.form.get('plate_number')
+            
+            if drivers_license and allowed_file(drivers_license.filename):
+                filename = secure_filename(f"{user.id}_drivers_license_{drivers_license.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                drivers_license.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='drivers_license',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append("Driver's License")
+            
+            if or_cr and allowed_file(or_cr.filename):
+                filename = secure_filename(f"{user.id}_or_cr_{or_cr.filename}")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                or_cr.save(filepath)
+                
+                doc = VerificationDocument(
+                    user_id=user.id,
+                    document_type='or_cr',
+                    file_path=filename
+                )
+                db.session.add(doc)
+                uploaded_files.append('OR/CR')
+            
+            # Save vehicle info
+            if vehicle_type and plate_number:
+                vehicle_info = VehicleInfo(
+                    user_id=user.id,
+                    vehicle_type=vehicle_type,
+                    plate_number=plate_number
+                )
+                db.session.add(vehicle_info)
+                uploaded_files.append('Vehicle Information')
+        
+        if uploaded_files:
+            db.session.commit()
+            log_action('VERIFICATION_DOCS_UPLOADED', 'User', user.id, 
+                      f"Uploaded: {', '.join(uploaded_files)}")
+            flash(f'Documents uploaded successfully! Your account is pending admin approval.', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash('Please upload all required documents.', 'danger')
+    
+    return render_template('upload_verification_documents.html', user=user)
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -525,6 +633,10 @@ def login():
         if user and user.check_password(password):
             if not user.is_verified:
                 flash('Please verify your email before logging in.', 'warning')
+                return redirect(url_for('login'))
+            
+            if user.is_suspended:
+                flash('Your account has been suspended. Please contact support.', 'danger')
                 return redirect(url_for('login'))
             
             session['user_id'] = user.id
@@ -1596,12 +1708,83 @@ def reject_user(user_id):
     return redirect(url_for('admin_approvals'))
 
 
+@app.route('/admin/document/<int:doc_id>')
+@login_required
+@role_required('admin')
+def view_document(doc_id):
+    """View uploaded verification document"""
+    from flask import send_from_directory
+    doc = VerificationDocument.query.get_or_404(doc_id)
+    return send_from_directory(app.config['UPLOAD_FOLDER'], doc.file_path)
+
+
 @app.route('/admin/users')
 @login_required
 @role_required('admin')
 def admin_users():
-    users = User.query.order_by(User.created_at.desc()).all()
+    users = User.query.filter(User.role != 'admin').order_by(User.created_at.desc()).all()
     return render_template('admin_users.html', users=users)
+
+
+@app.route('/admin/user/<int:user_id>/suspend', methods=['POST'])
+@login_required
+@role_required('admin')
+def suspend_user(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot suspend admin users.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    user.is_suspended = not user.is_suspended
+    db.session.commit()
+    
+    action = 'SUSPENDED' if user.is_suspended else 'UNSUSPENDED'
+    log_action(f'USER_{action}', 'User', user.id, f'{action} {user.role}: {user.email}')
+    
+    status = 'suspended' if user.is_suspended else 'unsuspended'
+    flash(f'User account {status} successfully!', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/<int:user_id>/delete', methods=['POST'])
+@login_required
+@role_required('admin')
+def delete_user(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot delete admin users.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    log_action('USER_DELETED', 'User', user.id, f'Deleted {user.role}: {user.email}')
+    
+    db.session.delete(user)
+    db.session.commit()
+    
+    flash('User account deleted successfully!', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/<int:user_id>/toggle-approval', methods=['POST'])
+@login_required
+@role_required('admin')
+def toggle_user_approval(user_id):
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin' or user.role == 'customer':
+        flash('Cannot change approval status for this user type.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    user.is_approved = not user.is_approved
+    db.session.commit()
+    
+    status = 'approved' if user.is_approved else 'revoked'
+    log_action(f'USER_APPROVAL_{status.upper()}', 'User', user.id, 
+              f'Approval {status} for {user.role}: {user.email}')
+    
+    flash(f'User approval status changed to: {status}', 'success')
+    return redirect(url_for('admin_users'))
 
 
 @app.route('/admin/categories', methods=['GET', 'POST'])
