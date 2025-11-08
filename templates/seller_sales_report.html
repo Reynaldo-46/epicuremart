@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-chart-line"></i> Sales Report</h2>
+        <a href="{{ url_for('seller_dashboard') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+    
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Sales</h5>
+                    <h2 class="mb-0">₱{{ "%.2f"|format(total_sales) }}</h2>
+                    <small>Gross Revenue</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-danger text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Admin Commission (5%)</h5>
+                    <h2 class="mb-0">₱{{ "%.2f"|format(total_commission) }}</h2>
+                    <small>Per Transaction</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Your Earnings</h5>
+                    <h2 class="mb-0">₱{{ "%.2f"|format(total_earnings) }}</h2>
+                    <small>Net Revenue</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Monthly Breakdown -->
+    {% if monthly_data %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-calendar-alt"></i> Monthly Breakdown</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th>Orders</th>
+                            <th>Gross Sales</th>
+                            <th>Commission (5%)</th>
+                            <th>Your Earnings</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for month, data in monthly_data.items()|sort(reverse=True) %}
+                        <tr>
+                            <td>{{ month }}</td>
+                            <td>{{ data.count }}</td>
+                            <td>₱{{ "%.2f"|format(data.sales) }}</td>
+                            <td class="text-danger">-₱{{ "%.2f"|format(data.commission) }}</td>
+                            <td class="text-success fw-bold">₱{{ "%.2f"|format(data.earnings) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Detailed Transaction List -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-list"></i> Transaction Details</h5>
+        </div>
+        <div class="card-body">
+            {% if completed_orders %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Order Number</th>
+                            <th>Date</th>
+                            <th>Customer</th>
+                            <th>Items</th>
+                            <th>Subtotal</th>
+                            <th>Commission (5%)</th>
+                            <th>Your Earnings</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in completed_orders %}
+                        <tr>
+                            <td>
+                                <a href="{{ url_for('seller_order_detail', order_id=order.id) }}">
+                                    {{ order.order_number }}
+                                </a>
+                            </td>
+                            <td>{{ order.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ order.customer.full_name }}</td>
+                            <td>{{ order.items|length }}</td>
+                            <td>₱{{ "%.2f"|format(order.subtotal) }}</td>
+                            <td class="text-danger">-₱{{ "%.2f"|format(order.commission_amount) }}</td>
+                            <td class="text-success fw-bold">₱{{ "%.2f"|format(order.seller_amount) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-secondary fw-bold">
+                            <td colspan="4">TOTAL</td>
+                            <td>₱{{ "%.2f"|format(total_sales) }}</td>
+                            <td class="text-danger">-₱{{ "%.2f"|format(total_commission) }}</td>
+                            <td class="text-success">₱{{ "%.2f"|format(total_earnings) }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> No completed orders yet.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Commission Info Box -->
+    <div class="alert alert-info mt-4">
+        <h5><i class="fas fa-info-circle"></i> Commission Structure</h5>
+        <p class="mb-0">
+            A 5% commission is deducted from each transaction (not per product) and goes to platform administration.
+            This commission helps maintain and improve the Epicuremart platform for all users.
+        </p>
+    </div>
+</div>
+{% endblock %}

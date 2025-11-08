@@ -1427,6 +1427,47 @@ def mark_order_ready(order_id):
     return redirect(url_for('seller_order_detail', order_id=order_id))
 
 
+@app.route('/seller/sales-report')
+@login_required
+@role_required('seller')
+def seller_sales_report():
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        return redirect(url_for('create_shop'))
+    
+    # Get all completed orders for this shop
+    completed_orders = Order.query.filter_by(
+        shop_id=user.shop.id,
+        status='DELIVERED'
+    ).order_by(Order.created_at.desc()).all()
+    
+    # Calculate totals
+    total_sales = sum([float(order.subtotal) for order in completed_orders])
+    total_commission = sum([float(order.commission_amount) for order in completed_orders])
+    total_earnings = sum([float(order.seller_amount) for order in completed_orders])
+    
+    # Group orders by month for analytics
+    from collections import defaultdict
+    monthly_data = defaultdict(lambda: {'sales': 0, 'commission': 0, 'earnings': 0, 'count': 0})
+    
+    for order in completed_orders:
+        month_key = order.created_at.strftime('%Y-%m')
+        monthly_data[month_key]['sales'] += float(order.subtotal)
+        monthly_data[month_key]['commission'] += float(order.commission_amount)
+        monthly_data[month_key]['earnings'] += float(order.seller_amount)
+        monthly_data[month_key]['count'] += 1
+    
+    return render_template('seller_sales_report.html',
+        shop=user.shop,
+        completed_orders=completed_orders,
+        total_sales=total_sales,
+        total_commission=total_commission,
+        total_earnings=total_earnings,
+        monthly_data=dict(monthly_data)
+    )
+
+
 # ==================== COURIER ROUTES ====================
 
 @app.route('/courier/dashboard')
@@ -1442,9 +1483,29 @@ def courier_dashboard():
         .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Calculate earnings from completed deliveries
+    completed_orders = Order.query.filter_by(
+        courier_id=session['user_id'],
+        status='DELIVERED'
+    ).all()
+    
+    total_deliveries = len(completed_orders)
+    total_earnings = sum([float(order.courier_earnings) for order in completed_orders])
+    
+    # Monthly earnings
+    from collections import defaultdict
+    monthly_earnings = defaultdict(float)
+    for order in completed_orders:
+        month_key = order.created_at.strftime('%Y-%m')
+        monthly_earnings[month_key] += float(order.courier_earnings)
+    
     return render_template('courier_dashboard.html', 
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        total_earnings=total_earnings,
+        monthly_earnings=dict(monthly_earnings),
+        completed_orders=completed_orders[:10]  # Last 10 completed
     )
 
 
@@ -1530,9 +1591,29 @@ def rider_dashboard():
         .filter(Order.status.in_(['OUT_FOR_DELIVERY']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Calculate earnings from completed deliveries
+    completed_orders = Order.query.filter_by(
+        rider_id=session['user_id'],
+        status='DELIVERED'
+    ).all()
+    
+    total_deliveries = len(completed_orders)
+    total_earnings = sum([float(order.rider_earnings) for order in completed_orders])
+    
+    # Monthly earnings
+    from collections import defaultdict
+    monthly_earnings = defaultdict(float)
+    for order in completed_orders:
+        month_key = order.created_at.strftime('%Y-%m')
+        monthly_earnings[month_key] += float(order.rider_earnings)
+    
     return render_template('rider_dashboard.html',
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        total_earnings=total_earnings,
+        monthly_earnings=dict(monthly_earnings),
+        completed_orders=completed_orders[:10]  # Last 10 completed
     )
 
 
