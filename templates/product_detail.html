@@ -87,15 +87,22 @@
                 <div class="row g-3 mb-3">
                     {% if product.stock > 0 %}
                     <div class="col-12">
-                        <form method="POST" action="{{ url_for('add_to_cart', product_id=product.id) }}">
+                        <form method="POST" action="{{ url_for('add_to_cart', product_id=product.id) }}" id="addToCartForm">
                             <div class="row g-3">
                                 <div class="col-auto">
                                     <label class="form-label">Quantity</label>
-                                    <input type="number" name="quantity" class="form-control" 
-                                           value="1" min="1" max="{{ product.stock }}" style="width: 100px;">
+                                    <input type="number" 
+                                           name="quantity" 
+                                           id="quantityInput"
+                                           class="form-control" 
+                                           value="1" 
+                                           min="1" 
+                                           max="{{ product.stock }}" 
+                                           style="width: 100px;">
+                                    <small class="text-muted" id="stockMessage">{{ product.stock }} available</small>
                                 </div>
                                 <div class="col-auto d-flex align-items-end">
-                                    <button type="submit" class="btn btn-primary btn-lg">
+                                    <button type="submit" class="btn btn-primary btn-lg" id="addToCartBtn">
                                         <i class="fas fa-cart-plus me-2"></i>Add to Cart
                                     </button>
                                 </div>
@@ -126,6 +133,49 @@
             {% endif %}
         </div>
     </div>
+
+    <script>
+    {% if session.user_id and session.role == 'customer' and product.stock > 0 %}
+    document.addEventListener('DOMContentLoaded', function() {
+        const quantityInput = document.getElementById('quantityInput');
+        const addToCartBtn = document.getElementById('addToCartBtn');
+        const stockMessage = document.getElementById('stockMessage');
+        const maxStock = {{ product.stock }};
+        
+        quantityInput.addEventListener('input', function() {
+            const value = parseInt(this.value);
+            
+            if (value > maxStock) {
+                this.value = maxStock;
+                stockMessage.textContent = 'Cannot exceed available stock!';
+                stockMessage.classList.remove('text-muted');
+                stockMessage.classList.add('text-danger');
+                addToCartBtn.disabled = true;
+            } else if (value < 1) {
+                this.value = 1;
+                stockMessage.textContent = maxStock + ' available';
+                stockMessage.classList.remove('text-danger');
+                stockMessage.classList.add('text-muted');
+                addToCartBtn.disabled = false;
+            } else {
+                stockMessage.textContent = maxStock + ' available';
+                stockMessage.classList.remove('text-danger');
+                stockMessage.classList.add('text-muted');
+                addToCartBtn.disabled = false;
+            }
+        });
+        
+        // Validate on form submit
+        document.getElementById('addToCartForm').addEventListener('submit', function(e) {
+            const value = parseInt(quantityInput.value);
+            if (value > maxStock || value < 1) {
+                e.preventDefault();
+                alert('Please enter a valid quantity between 1 and ' + maxStock);
+            }
+        });
+    });
+    {% endif %}
+    </script>
 
     <!-- Reviews Section -->
     <div class="row mt-5">
