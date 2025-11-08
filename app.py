@@ -47,8 +47,10 @@ class User(db.Model):
     role = db.Column(db.Enum('admin', 'seller', 'customer', 'courier', 'rider'), nullable=False)
     is_verified = db.Column(db.Boolean, default=False)
     is_approved = db.Column(db.Boolean, default=True)  # Admin approval for sellers/couriers/riders
+    is_suspended = db.Column(db.Boolean, default=False)  # Admin can suspend accounts
     full_name = db.Column(db.String(100))
     phone = db.Column(db.String(20))
+    verification_code = db.Column(db.String(6))  # 6-digit verification code
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -109,9 +111,23 @@ class Address(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     label = db.Column(db.String(50))  # Home, Work, etc.
+    
+    # Philippine address fields
+    region = db.Column(db.String(100))
+    province = db.Column(db.String(100))
+    municipality = db.Column(db.String(100))
+    barangay = db.Column(db.String(100))
+    
+    # Optional detailed address fields
+    street = db.Column(db.String(200))
+    block = db.Column(db.String(50))
+    lot = db.Column(db.String(50))
+    
+    # Legacy fields (kept for backward compatibility)
     full_address = db.Column(db.Text, nullable=False)
     city = db.Column(db.String(100))
     postal_code = db.Column(db.String(20))
+    
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -137,6 +153,10 @@ class Order(db.Model):
     commission_rate = db.Column(Numeric(5, 2), default=5.00)  # 5% commission
     commission_amount = db.Column(Numeric(10, 2), default=0.00)
     seller_amount = db.Column(Numeric(10, 2), default=0.00)
+    
+    # Delivery earnings split
+    courier_earnings = db.Column(Numeric(10, 2), default=0.00)  # 60% of delivery fee
+    rider_earnings = db.Column(Numeric(10, 2), default=0.00)  # 40% of delivery fee
 
     # QR Tokens
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
@@ -226,6 +246,60 @@ class Message(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
+
+
+class CartItem(db.Model):
+    """Separate cart entries to support multiple transactions of same product"""
+    __tablename__ = 'cart_items'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='cart_items')
+    product = db.relationship('Product')
+
+
+class VerificationDocument(db.Model):
+    """Store verification documents for sellers, couriers, and riders"""
+    __tablename__ = 'verification_documents'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    document_type = db.Column(db.Enum(
+        'valid_id', 'business_permit', 'drivers_license', 'or_cr'
+    ), nullable=False)
+    file_path = db.Column(db.String(255), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='verification_documents')
+
+
+class VehicleInfo(db.Model):
+    """Store vehicle information for couriers and riders"""
+    __tablename__ = 'vehicle_info'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    vehicle_type = db.Column(db.String(50), nullable=False)  # motorcycle, car, van, etc.
+    plate_number = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='vehicle_info', uselist=False)
+
+
+class AdminMessage(db.Model):
+    """Messages between admin and other users"""
+    __tablename__ = 'admin_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    message_text = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', foreign_keys=[user_id], backref='received_admin_messages')
+    sender = db.relationship('User', foreign_keys=[sender_id])
+
     
 # ==================== HELPER FUNCTIONS ====================
 
