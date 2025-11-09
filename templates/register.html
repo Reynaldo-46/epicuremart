@@ -27,11 +27,11 @@
                             <small class="form-text text-muted" id="roleInfo"></small>
                         </div>
 
-                        <!-- ID Upload Section (shown for Seller and Rider/Courier) -->
+                        <!-- ID Upload Section (shown for all users, optional for Buyers) -->
                         <div class="mb-4 d-none" id="idUploadSection">
-                            <label class="form-label fw-bold">Valid ID Document *</label>
+                            <label class="form-label fw-bold">Valid ID Document <span id="idRequiredLabel">*</span></label>
                             <input type="file" name="id_document" class="form-control" id="idDocumentInput" accept="image/*">
-                            <small class="form-text text-muted">Upload a valid government-issued ID (Required for Sellers and Riders/Couriers)</small>
+                            <small class="form-text text-muted" id="idUploadHelp">Upload a valid government-issued ID</small>
                         </div>
                         
                         <!-- Business Permit Section (shown for Seller only) -->
@@ -316,6 +316,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     const roleInfo = document.getElementById('roleInfo');
     const idUploadSection = document.getElementById('idUploadSection');
     const idDocumentInput = document.getElementById('idDocumentInput');
+    const idRequiredLabel = document.getElementById('idRequiredLabel');
+    const idUploadHelp = document.getElementById('idUploadHelp');
     const businessPermitSection = document.getElementById('businessPermitSection');
     const businessPermitInput = document.getElementById('businessPermitInput');
     const driversLicenseSection = document.getElementById('driversLicenseSection');
@@ -330,7 +332,7 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     const value = this.value;
     
     const messages = {
-        'customer': 'Start shopping immediately after email verification',
+        'customer': 'Start shopping immediately after email verification. ID upload is optional but recommended for verification.',
         'seller': 'Requires admin approval, ID, and business permit upload. You\'ll receive an email when approved.',
         'rider': 'Requires admin approval, ID, driver\'s license, and OR/CR upload. Join our delivery network today.'
     };
@@ -360,14 +362,24 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     }
     
     // Show/hide sections based on role
-    if (value === 'seller') {
+    if (value === 'customer') {
+        // Show ID upload for customer but make it optional
+        idUploadSection.classList.remove('d-none');
+        idDocumentInput.required = false;
+        idRequiredLabel.textContent = ' (Optional)';
+        idUploadHelp.textContent = 'Upload a valid government-issued ID for verification (Optional but recommended)';
+    } else if (value === 'seller') {
         idUploadSection.classList.remove('d-none');
         idDocumentInput.required = true;
+        idRequiredLabel.textContent = ' *';
+        idUploadHelp.textContent = 'Upload a valid government-issued ID (Required)';
         businessPermitSection.classList.remove('d-none');
         businessPermitInput.required = true;
     } else if (value === 'rider') {
         idUploadSection.classList.remove('d-none');
         idDocumentInput.required = true;
+        idRequiredLabel.textContent = ' *';
+        idUploadHelp.textContent = 'Upload a valid government-issued ID (Required)';
         driversLicenseSection.classList.remove('d-none');
         driversLicenseInput.required = true;
         orCrSection.classList.remove('d-none');

@@ -477,20 +477,20 @@ def register():
         )
         user.set_password(password)
         
-        # Handle ID document upload for sellers, couriers, riders
-        if role in ['seller', 'courier', 'rider']:
+        # Handle ID document upload for all roles (including buyers/customers)
+        if role in ['customer', 'seller', 'courier', 'rider']:
             if 'id_document' in request.files:
                 file = request.files['id_document']
-                if file and allowed_file(file.filename):
+                if file and file.filename and allowed_file(file.filename):
                     filename = secure_filename(file.filename)
                     filename = f"id_{role}_{email.split('@')[0]}_{filename}"
                     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                     file.save(filepath)
                     user.id_document = filename
-                else:
+                elif role in ['seller', 'courier', 'rider']:
                     flash('Valid ID document is required for this role.', 'danger')
                     return redirect(url_for('register'))
-            else:
+            elif role in ['seller', 'courier', 'rider']:
                 flash('ID document upload is required for sellers, couriers, and riders.', 'danger')
                 return redirect(url_for('register'))
         
