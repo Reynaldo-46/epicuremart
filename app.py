@@ -1597,6 +1597,57 @@ def seller_dashboard():
     )
 
 
+@app.route('/seller/sales-report')
+@login_required
+@role_required('seller')
+def seller_sales_report():
+    """Detailed sales report showing 5% commission breakdown per transaction"""
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        return redirect(url_for('create_shop'))
+    
+    # Get filter parameters
+    status_filter = request.args.get('status', 'all')
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    # Build query
+    query = Order.query.filter_by(shop_id=user.shop.id)
+    
+    if status_filter != 'all':
+        query = query.filter_by(status=status_filter)
+    
+    # Get paginated orders
+    orders_pagination = query.order_by(Order.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    
+    # Calculate totals
+    total_orders = query.count()
+    delivered_orders = Order.query.filter_by(shop_id=user.shop.id, status='DELIVERED').count()
+    
+    # Revenue summary
+    total_sales = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    total_commission = db.session.query(func.sum(Order.commission_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    total_earnings = db.session.query(func.sum(Order.seller_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    
+    return render_template('seller_sales_report.html',
+        shop=user.shop,
+        orders=orders_pagination.items,
+        pagination=orders_pagination,
+        status_filter=status_filter,
+        total_orders=total_orders,
+        delivered_orders=delivered_orders,
+        total_sales=total_sales,
+        total_commission=total_commission,
+        total_earnings=total_earnings
+    )
+
+
 @app.route('/seller/shop/create', methods=['GET', 'POST'])
 @login_required
 @role_required('seller')
@@ -1814,18 +1865,40 @@ def mark_order_ready(order_id):
 @login_required
 @role_required('courier')
 def courier_dashboard():
+    from sqlalchemy import func
+    
+    user_id = session['user_id']
+    
     # Show available orders to pickup
     available_orders = Order.query.filter_by(status='READY_FOR_PICKUP', courier_id=None)\
         .order_by(Order.created_at.desc()).all()
     
     # Show assigned orders
-    my_orders = Order.query.filter_by(courier_id=session['user_id'])\
+    my_orders = Order.query.filter_by(courier_id=user_id)\
         .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Earnings statistics
+    total_deliveries = Order.query.filter_by(courier_id=user_id, status='DELIVERED').count()
+    pending_deliveries = Order.query.filter_by(courier_id=user_id)\
+        .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'])).count()
+    
+    # Total earnings (60% of delivery fee for completed deliveries)
+    total_earnings = db.session.query(func.sum(Order.courier_earnings))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Pending earnings (not yet delivered)
+    pending_earnings = db.session.query(func.sum(Order.courier_earnings))\
+        .filter(Order.courier_id == user_id, 
+                Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'])).scalar() or 0
+    
     return render_template('courier_dashboard.html', 
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        pending_deliveries=pending_deliveries,
+        total_earnings=total_earnings,
+        pending_earnings=pending_earnings
     )
 
 
@@ -1904,18 +1977,38 @@ def courier_handoff_qr(order_id):
 @login_required
 @role_required('rider')
 def rider_dashboard():
+    from sqlalchemy import func
+    
+    user_id = session['user_id']
+    
     # Orders ready for rider pickup from courier
     available_orders = Order.query.filter_by(status='IN_TRANSIT_TO_RIDER', rider_id=None)\
         .order_by(Order.created_at.desc()).all()
     
     # Orders assigned to this rider
-    my_orders = Order.query.filter_by(rider_id=session['user_id'])\
+    my_orders = Order.query.filter_by(rider_id=user_id)\
         .filter(Order.status.in_(['OUT_FOR_DELIVERY']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Earnings statistics
+    total_deliveries = Order.query.filter_by(rider_id=user_id, status='DELIVERED').count()
+    pending_deliveries = Order.query.filter_by(rider_id=user_id, status='OUT_FOR_DELIVERY').count()
+    
+    # Total earnings (40% of delivery fee for completed deliveries)
+    total_earnings = db.session.query(func.sum(Order.rider_earnings))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Pending earnings (not yet delivered)
+    pending_earnings = db.session.query(func.sum(Order.rider_earnings))\
+        .filter(Order.rider_id == user_id, Order.status == 'OUT_FOR_DELIVERY').scalar() or 0
+    
     return render_template('rider_dashboard.html',
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        pending_deliveries=pending_deliveries,
+        total_earnings=total_earnings,
+        pending_earnings=pending_earnings
     )
 
 

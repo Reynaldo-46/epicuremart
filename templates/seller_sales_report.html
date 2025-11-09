@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-file-invoice-dollar"></i> Sales Report</h2>
+        <a href="{{ url_for('seller_dashboard') }}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+        </a>
+    </div>
+    
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <h6 class="card-title">Total Sales (Before Commission)</h6>
+                    <h3 class="mb-0">₱{{ "%.2f"|format(total_sales) }}</h3>
+                    <small>{{ delivered_orders }} delivered orders</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <h6 class="card-title">Admin Commission (5%)</h6>
+                    <h3 class="mb-0">₱{{ "%.2f"|format(total_commission) }}</h3>
+                    <small>Paid per transaction</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <h6 class="card-title">Your Earnings (95%)</h6>
+                    <h3 class="mb-0">₱{{ "%.2f"|format(total_earnings) }}</h3>
+                    <small>After commission</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <h6 class="card-title">Total Orders</h6>
+                    <h3 class="mb-0">{{ total_orders }}</h3>
+                    <small>All statuses</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Filter Tabs -->
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <a class="nav-link {% if status_filter == 'all' %}active{% endif %}" 
+               href="{{ url_for('seller_sales_report', status='all') }}">All Orders</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if status_filter == 'DELIVERED' %}active{% endif %}" 
+               href="{{ url_for('seller_sales_report', status='DELIVERED') }}">Delivered</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if status_filter == 'PENDING_PAYMENT' %}active{% endif %}" 
+               href="{{ url_for('seller_sales_report', status='PENDING_PAYMENT') }}">Pending</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if status_filter == 'READY_FOR_PICKUP' %}active{% endif %}" 
+               href="{{ url_for('seller_sales_report', status='READY_FOR_PICKUP') }}">Ready for Pickup</a>
+        </li>
+    </ul>
+    
+    <!-- Sales Report Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Order #</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th>Subtotal</th>
+                            <th>Commission (5%)</th>
+                            <th>Your Earnings (95%)</th>
+                            <th>Delivery Fee</th>
+                            <th>Total Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if orders %}
+                        {% for order in orders %}
+                        <tr>
+                            <td>
+                                <a href="{{ url_for('seller_order_detail', order_id=order.id) }}" 
+                                   class="text-decoration-none">
+                                    {{ order.order_number }}
+                                </a>
+                            </td>
+                            <td>{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>
+                                <span class="badge 
+                                    {% if order.status == 'DELIVERED' %}bg-success
+                                    {% elif order.status == 'CANCELLED' %}bg-danger
+                                    {% elif order.status == 'PENDING_PAYMENT' %}bg-warning
+                                    {% else %}bg-info{% endif %}">
+                                    {{ order.status.replace('_', ' ')|title }}
+                                </span>
+                            </td>
+                            <td class="text-end">₱{{ "%.2f"|format(order.subtotal) }}</td>
+                            <td class="text-end text-danger">
+                                -₱{{ "%.2f"|format(order.commission_amount) }}
+                                <small class="d-block text-muted">{{ "%.1f"|format(order.commission_rate) }}%</small>
+                            </td>
+                            <td class="text-end fw-bold text-success">
+                                ₱{{ "%.2f"|format(order.seller_amount) }}
+                            </td>
+                            <td class="text-end">₱{{ "%.2f"|format(order.delivery_fee) }}</td>
+                            <td class="text-end fw-bold">₱{{ "%.2f"|format(order.total_amount) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">
+                                <i class="fas fa-inbox fa-3x mb-3 d-block"></i>
+                                No orders found for the selected filter.
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                    {% if orders and status_filter == 'DELIVERED' %}
+                    <tfoot class="table-light fw-bold">
+                        <tr>
+                            <td colspan="3" class="text-end">Page Total:</td>
+                            <td class="text-end">₱{{ "%.2f"|format(orders|sum(attribute='subtotal')) }}</td>
+                            <td class="text-end text-danger">-₱{{ "%.2f"|format(orders|sum(attribute='commission_amount')) }}</td>
+                            <td class="text-end text-success">₱{{ "%.2f"|format(orders|sum(attribute='seller_amount')) }}</td>
+                            <td class="text-end">₱{{ "%.2f"|format(orders|sum(attribute='delivery_fee')) }}</td>
+                            <td class="text-end">₱{{ "%.2f"|format(orders|sum(attribute='total_amount')) }}</td>
+                        </tr>
+                    </tfoot>
+                    {% endif %}
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            {% if pagination.pages > 1 %}
+            <nav aria-label="Page navigation">
+                <ul class="pagination justify-content-center">
+                    {% if pagination.has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('seller_sales_report', status=status_filter, page=pagination.prev_num) }}">
+                            Previous
+                        </a>
+                    </li>
+                    {% endif %}
+                    
+                    {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                        {% if page_num %}
+                            <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                                <a class="page-link" href="{{ url_for('seller_sales_report', status=status_filter, page=page_num) }}">
+                                    {{ page_num }}
+                                </a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        {% endif %}
+                    {% endfor %}
+                    
+                    {% if pagination.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('seller_sales_report', status=status_filter, page=pagination.next_num) }}">
+                            Next
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Commission Info Box -->
+    <div class="alert alert-info mt-4">
+        <h5><i class="fas fa-info-circle me-2"></i>Commission Information</h5>
+        <p class="mb-2">
+            <strong>Commission Rate:</strong> 5% per transaction (calculated on subtotal, not including delivery fee)
+        </p>
+        <p class="mb-0">
+            <strong>Payment:</strong> Commission is automatically deducted from each completed order. You receive 95% of the subtotal amount.
+        </p>
+    </div>
+</div>
+{% endblock %}
