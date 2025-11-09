@@ -427,7 +427,7 @@ def register():
         first_name = request.form.get('first_name')
         middle_name = request.form.get('middle_name', '')
         last_name = request.form.get('last_name')
-        phone = request.form.get('phone')
+        phone = request.form.get('phone', '')
         
         # Address fields
         region = request.form.get('region')
@@ -435,6 +435,13 @@ def register():
         municipality = request.form.get('municipality')
         city = request.form.get('city')
         barangay = request.form.get('barangay')
+        street = request.form.get('street', '')
+        block = request.form.get('block', '')
+        lot = request.form.get('lot', '')
+        
+        # Rider/Courier specific fields
+        plate_number = request.form.get('plate_number', '')
+        vehicle_type = request.form.get('vehicle_type', '')
         
         # Validate password match
         if password != confirm_password:
@@ -443,6 +450,11 @@ def register():
         
         if User.query.filter_by(email=email).first():
             flash('Email already registered.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Phone validation - required for riders and customers
+        if role in ['customer', 'rider', 'courier'] and not phone:
+            flash('Contact number is required for this role.', 'danger')
             return redirect(url_for('register'))
         
         # Sellers, couriers, riders need admin approval
@@ -459,6 +471,8 @@ def register():
             middle_name=middle_name,
             last_name=last_name,
             phone=phone,
+            plate_number=plate_number,
+            vehicle_type=vehicle_type,
             is_approved=is_approved
         )
         user.set_password(password)
@@ -480,12 +494,77 @@ def register():
                 flash('ID document upload is required for sellers, couriers, and riders.', 'danger')
                 return redirect(url_for('register'))
         
+        # Handle business permit for sellers
+        if role == 'seller':
+            if 'business_permit' in request.files:
+                file = request.files['business_permit']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"business_permit_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.business_permit = filename
+                else:
+                    flash('Valid business permit is required for sellers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('Business permit upload is required for sellers.', 'danger')
+                return redirect(url_for('register'))
+        
+        # Handle driver's license and OR/CR for riders and couriers
+        if role in ['rider', 'courier']:
+            # Driver's License
+            if 'drivers_license' in request.files:
+                file = request.files['drivers_license']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"drivers_license_{role}_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.drivers_license = filename
+                else:
+                    flash('Valid driver\'s license is required for riders and couriers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('Driver\'s license upload is required for riders and couriers.', 'danger')
+                return redirect(url_for('register'))
+            
+            # OR/CR
+            if 'or_cr' in request.files:
+                file = request.files['or_cr']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"or_cr_{role}_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.or_cr = filename
+                else:
+                    flash('Valid OR/CR is required for riders and couriers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('OR/CR upload is required for riders and couriers.', 'danger')
+                return redirect(url_for('register'))
+            
+            # Validate plate number and vehicle type
+            if not plate_number or not vehicle_type:
+                flash('Plate number and vehicle type are required for riders and couriers.', 'danger')
+                return redirect(url_for('register'))
+        
         db.session.add(user)
         db.session.commit()
         
         # Create address entry if provided
         if region and province and barangay:
-            full_address = f"{barangay}, {city or municipality}, {province}, {region}"
+            full_address_parts = []
+            if lot:
+                full_address_parts.append(f"Lot {lot}")
+            if block:
+                full_address_parts.append(f"Block {block}")
+            if street:
+                full_address_parts.append(street)
+            full_address_parts.extend([barangay, city or municipality, province, region])
+            full_address = ", ".join(full_address_parts)
+            
             address = Address(
                 user_id=user.id,
                 label='Home',
@@ -495,30 +574,38 @@ def register():
                 municipality=municipality,
                 city=city,
                 barangay=barangay,
+                street=street,
+                block=block,
+                lot=lot,
                 is_default=True
             )
             db.session.add(address)
             db.session.commit()
         
-        # Send verification email
-        verification_token = generate_qr_token(user.id, 'email_verify', expiry_hours=48)
-        verify_url = url_for('verify_email', token=verification_token, _external=True)
+        # Generate 6-digit verification code
+        verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+        user.verification_code = verification_code
+        user.verification_code_expires = datetime.utcnow() + timedelta(hours=48)
+        db.session.commit()
+        
+        # Send verification email with code
         send_email(
             user.email,
             'Verify your Epicuremart account',
-            f'Click here to verify: {verify_url}'
+            f'Your verification code is: {verification_code}\n\nThis code will expire in 48 hours.\nPlease enter this code on the verification page to activate your account.'
         )
         
         log_action('USER_REGISTERED', 'User', user.id, f'New {role} registered')
         
-        flash('Registration successful! Please check your email to verify your account.', 'success')
-        return redirect(url_for('login'))
+        flash('Registration successful! Please check your email for your verification code.', 'success')
+        return redirect(url_for('verify_email_code', user_id=user.id))
     
     return render_template('register.html')
 
 
 @app.route('/verify-email/<token>')
 def verify_email(token):
+    """Legacy email verification via token link (kept for backwards compatibility)"""
     payload = verify_qr_token(token)
     if not payload or payload.get('type') != 'email_verify':
         flash('Invalid or expired verification link.', 'danger')
@@ -532,6 +619,70 @@ def verify_email(token):
         flash('Email verified successfully! You can now log in.', 'success')
     
     return redirect(url_for('login'))
+
+
+@app.route('/verify-code/<int:user_id>', methods=['GET', 'POST'])
+def verify_email_code(user_id):
+    """Email verification using 6-digit code"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.is_verified:
+        flash('Your account is already verified.', 'info')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        code = request.form.get('verification_code', '').strip()
+        
+        if not code:
+            flash('Please enter the verification code.', 'warning')
+            return render_template('verify_code.html', user=user)
+        
+        # Check if code matches and is not expired
+        if user.verification_code != code:
+            flash('Invalid verification code. Please try again.', 'danger')
+            return render_template('verify_code.html', user=user)
+        
+        if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+            flash('Verification code has expired. Please request a new one.', 'danger')
+            return render_template('verify_code.html', user=user, show_resend=True)
+        
+        # Verify the user
+        user.is_verified = True
+        user.verification_code = None
+        user.verification_code_expires = None
+        db.session.commit()
+        
+        log_action('EMAIL_VERIFIED', 'User', user.id, 'Verified via code')
+        flash('Email verified successfully! You can now log in.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('verify_code.html', user=user)
+
+
+@app.route('/resend-verification/<int:user_id>', methods=['POST'])
+def resend_verification_code(user_id):
+    """Resend verification code"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.is_verified:
+        flash('Your account is already verified.', 'info')
+        return redirect(url_for('login'))
+    
+    # Generate new verification code
+    verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    user.verification_code = verification_code
+    user.verification_code_expires = datetime.utcnow() + timedelta(hours=48)
+    db.session.commit()
+    
+    # Send verification email with code
+    send_email(
+        user.email,
+        'Your New Verification Code',
+        f'Your new verification code is: {verification_code}\n\nThis code will expire in 48 hours.'
+    )
+    
+    flash('A new verification code has been sent to your email.', 'success')
+    return redirect(url_for('verify_email_code', user_id=user.id))
 
 
 @app.route('/login', methods=['GET', 'POST'])
