@@ -384,6 +384,29 @@ def generate_order_number():
     return f"EM{timestamp}{random_part}"
 
 
+@app.context_processor
+def inject_cart_and_messages():
+    """Make cart count and unread messages available to all templates"""
+    cart_count = 0
+    unread_messages = 0
+    
+    if 'user_id' in session:
+        user_id = session['user_id']
+        # Cart count = number of cart item transactions
+        cart_count = CartItem.query.filter_by(user_id=user_id).count()
+        
+        # Unread messages count - messages where user is recipient and not read
+        unread_messages = Message.query.join(Conversation).filter(
+            db.or_(
+                db.and_(Conversation.user1_id == user_id, Message.sender_id != user_id),
+                db.and_(Conversation.user2_id == user_id, Message.sender_id != user_id)
+            ),
+            Message.is_read == False
+        ).count()
+    
+    return dict(cart_count=cart_count, unread_messages=unread_messages)
+
+
 # ==================== ROUTES ====================
 
 @app.route('/')
@@ -592,40 +615,86 @@ def browse():
 @app.route('/cart')
 @login_required
 def view_cart():
-    cart = session.get('cart', {})
+    """View cart with transaction-based cart items"""
+    user_id = session['user_id']
+    
+    # Get all cart items for this user (each entry is a separate transaction)
+    cart_items_db = CartItem.query.filter_by(user_id=user_id).order_by(CartItem.created_at.desc()).all()
+    
     cart_items = []
     total = 0
+    has_stock_error = False
     
-    for product_id, quantity in cart.items():
-        product = Product.query.get(int(product_id))
+    for cart_item in cart_items_db:
+        product = cart_item.product
         if product:
-            subtotal = float(product.price) * quantity
+            subtotal = float(product.price) * cart_item.quantity
+            
+            # Check if quantity exceeds stock
+            exceeds_stock = cart_item.quantity > product.stock
+            if exceeds_stock:
+                has_stock_error = True
+            
             cart_items.append({
+                'cart_item_id': cart_item.id,
                 'product': product,
-                'quantity': quantity,
-                'subtotal': subtotal
+                'quantity': cart_item.quantity,
+                'subtotal': subtotal,
+                'exceeds_stock': exceeds_stock,
+                'created_at': cart_item.created_at
             })
             total += subtotal
     
-    return render_template('cart.html', cart_items=cart_items, total=total)
+    return render_template('cart.html', cart_items=cart_items, total=total, has_stock_error=has_stock_error)
 
 
 @app.route('/cart/add/<int:product_id>', methods=['POST'])
 @login_required
 def add_to_cart(product_id):
+    """Add product to cart with stock validation"""
     product = Product.query.get_or_404(product_id)
     quantity = int(request.form.get('quantity', 1))
+    user_id = session['user_id']
     
-    cart = session.get('cart', {})
+    # Validate quantity
+    if quantity < 1:
+        flash('Quantity must be at least 1.', 'danger')
+        return redirect(request.referrer or url_for('browse'))
     
-    if str(product_id) in cart:
-        cart[str(product_id)] += quantity
-    else:
-        cart[str(product_id)] = quantity
+    # Check if product is active and in stock
+    if not product.is_active:
+        flash('This product is no longer available.', 'danger')
+        return redirect(url_for('browse'))
     
-    session['cart'] = cart
-    flash(f'{product.name} added to cart!', 'success')
-    return redirect(url_for('browse'))
+    if product.stock == 0:
+        flash('This product is out of stock.', 'danger')
+        return redirect(request.referrer or url_for('browse'))
+    
+    # Validate: requested quantity should not exceed stock
+    if quantity > product.stock:
+        flash(f'Only {product.stock} units available. Please adjust quantity.', 'danger')
+        return redirect(request.referrer or url_for('browse'))
+    
+    # Check total quantity in cart (all cart items for this product)
+    existing_cart_items = CartItem.query.filter_by(user_id=user_id, product_id=product_id).all()
+    total_in_cart = sum(item.quantity for item in existing_cart_items)
+    
+    # Check if adding this quantity would exceed stock
+    if total_in_cart + quantity > product.stock:
+        flash(f'Cannot add {quantity} more. You already have {total_in_cart} in cart. Only {product.stock} available.', 'warning')
+        return redirect(request.referrer or url_for('browse'))
+    
+    # Create new cart item (transaction-based - each add creates separate entry)
+    cart_item = CartItem(
+        user_id=user_id,
+        product_id=product_id,
+        quantity=quantity
+    )
+    db.session.add(cart_item)
+    db.session.commit()
+    
+    flash(f'{product.name} (x{quantity}) added to cart!', 'success')
+    return redirect(request.referrer or url_for('browse'))
 
 
 @app.route('/buy-now/<int:product_id>', methods=['POST'])
@@ -651,22 +720,27 @@ def buy_now(product_id):
     return redirect(url_for('checkout'))
 
 
-@app.route('/cart/remove/<int:product_id>')
+@app.route('/cart/remove/<int:cart_item_id>')
 @login_required
-def remove_from_cart(product_id):
-    cart = session.get('cart', {})
-    if str(product_id) in cart:
-        del cart[str(product_id)]
-        session['cart'] = cart
-        flash('Item removed from cart.', 'info')
+def remove_from_cart(cart_item_id):
+    """Remove a specific cart item transaction"""
+    user_id = session['user_id']
+    cart_item = CartItem.query.filter_by(id=cart_item_id, user_id=user_id).first_or_404()
+    
+    db.session.delete(cart_item)
+    db.session.commit()
+    
+    flash('Item removed from cart.', 'info')
     return redirect(url_for('view_cart'))
 
 
-@app.route('/cart/update/<int:product_id>', methods=['POST'])
+@app.route('/cart/update/<int:cart_item_id>', methods=['POST'])
 @login_required
-def update_cart_quantity(product_id):
-    """Update quantity of a product in the cart"""
-    product = Product.query.get_or_404(product_id)
+def update_cart_quantity(cart_item_id):
+    """Update quantity of a specific cart item with stock validation"""
+    user_id = session['user_id']
+    cart_item = CartItem.query.filter_by(id=cart_item_id, user_id=user_id).first_or_404()
+    product = cart_item.product
     new_quantity = int(request.form.get('quantity', 1))
     
     # Validate quantity
@@ -674,13 +748,14 @@ def update_cart_quantity(product_id):
         flash('Quantity must be at least 1.', 'warning')
         return redirect(url_for('view_cart'))
     
+    # Validate against stock
     if new_quantity > product.stock:
         flash(f'Only {product.stock} units available for {product.name}.', 'warning')
         return redirect(url_for('view_cart'))
     
-    cart = session.get('cart', {})
-    cart[str(product_id)] = new_quantity
-    session['cart'] = cart
+    # Update the cart item
+    cart_item.quantity = new_quantity
+    db.session.commit()
     
     flash(f'Updated quantity for {product.name}.', 'success')
     return redirect(url_for('view_cart'))
@@ -880,19 +955,27 @@ def delete_profile_picture():
 @login_required
 @role_required('customer')
 def checkout():
-    # Check for buy_now_cart first, then regular cart
-    buy_now_cart = session.get('buy_now_cart', {})
-    regular_cart = session.get('cart', {})
+    user_id = session['user_id']
     
-    # Use buy_now_cart if it exists, otherwise use regular cart
-    cart = buy_now_cart if buy_now_cart else regular_cart
-    is_buy_now = bool(buy_now_cart)
+    # Get cart items from database
+    cart_items_db = CartItem.query.filter_by(user_id=user_id).all()
     
-    if not cart:
+    if not cart_items_db:
         flash('Your cart is empty.', 'warning')
         return redirect(url_for('browse'))
     
-    addresses = Address.query.filter_by(user_id=session['user_id']).all()
+    # Check if any item exceeds stock before allowing checkout
+    has_stock_error = False
+    for cart_item in cart_items_db:
+        if cart_item.quantity > cart_item.product.stock:
+            has_stock_error = True
+            break
+    
+    if has_stock_error:
+        flash('One or more items exceed available stock. Please adjust your cart before checking out.', 'danger')
+        return redirect(url_for('view_cart'))
+    
+    addresses = Address.query.filter_by(user_id=user_id).all()
     
     if request.method == 'POST':
         address_id = request.form.get('address_id')
@@ -903,18 +986,18 @@ def checkout():
         
         # Get delivery address to calculate delivery fee
         delivery_address = Address.query.get(address_id)
-        if not delivery_address or delivery_address.user_id != session['user_id']:
+        if not delivery_address or delivery_address.user_id != user_id:
             flash('Invalid delivery address.', 'danger')
             return redirect(url_for('checkout'))
         
         # Validate stock availability BEFORE creating orders
-        for product_id, quantity in cart.items():
-            product = Product.query.get(int(product_id))
+        for cart_item in cart_items_db:
+            product = cart_item.product
             if not product:
                 flash(f'Product not found.', 'danger')
                 return redirect(url_for('view_cart'))
             
-            if product.stock < quantity:
+            if product.stock < cart_item.quantity:
                 flash(f'Insufficient stock for {product.name}. Only {product.stock} available.', 'danger')
                 return redirect(url_for('view_cart'))
             
@@ -937,12 +1020,12 @@ def checkout():
         
         # Group items by shop
         shop_orders = {}
-        for product_id, quantity in cart.items():
-            product = Product.query.get(int(product_id))
-            if product:
+        for cart_item in cart_items_db:
+            product = cart_item.product
+            if product and product.is_active:
                 if product.shop_id not in shop_orders:
                     shop_orders[product.shop_id] = []
-                shop_orders[product.shop_id].append((product, quantity))
+                shop_orders[product.shop_id].append((product, cart_item.quantity))
         
         # Create order for each shop
         for shop_id, items in shop_orders.items():
@@ -951,13 +1034,17 @@ def checkout():
             # Calculate total with delivery fee
             total_amount = subtotal + delivery_fee
             
-            # Calculate commission on subtotal (not including delivery fee)
+            # Calculate commission on subtotal (not including delivery fee) - 5% per transaction
             commission = subtotal * 0.05
             seller_amount = subtotal - commission
             
+            # Calculate courier/rider earnings split
+            courier_earnings = delivery_fee * 0.60  # 60% to courier
+            rider_earnings = delivery_fee * 0.40  # 40% to rider
+            
             order = Order(
                 order_number=generate_order_number(),
-                customer_id=session['user_id'],
+                customer_id=user_id,
                 shop_id=shop_id,
                 delivery_address_id=address_id,
                 subtotal=subtotal,
@@ -966,6 +1053,8 @@ def checkout():
                 commission_rate=5.00,
                 commission_amount=commission,
                 seller_amount=seller_amount,
+                courier_earnings=courier_earnings,
+                rider_earnings=rider_earnings,
                 status='PENDING_PAYMENT'
             )
             db.session.add(order)
@@ -989,15 +1078,12 @@ def checkout():
             
             log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
         
+        # Clear cart items from database
+        CartItem.query.filter_by(user_id=user_id).delete()
         db.session.commit()
         
-        # Clear both regular cart and buy_now_cart
-        session['cart'] = {}
-        if 'buy_now_cart' in session:
-            session.pop('buy_now_cart')
-        
         # Send confirmation email
-        user = User.query.get(session['user_id'])
+        user = User.query.get(user_id)
         send_email(
             user.email,
             'Order Confirmation',
@@ -1010,20 +1096,20 @@ def checkout():
     # Calculate cart preview with delivery fee estimate
     cart_items = []
     subtotal = 0
-    for product_id, quantity in cart.items():
-        product = Product.query.get(int(product_id))
+    for cart_item in cart_items_db:
+        product = cart_item.product
         if product:
-            item_total = float(product.price) * quantity
+            item_total = float(product.price) * cart_item.quantity
             subtotal += item_total
             cart_items.append({
                 'product': product,
-                'quantity': quantity,
+                'quantity': cart_item.quantity,
                 'subtotal': item_total
             })
     
     # Get delivery fee estimate if user has a default address
     default_address = Address.query.filter_by(
-        user_id=session['user_id'], 
+        user_id=user_id, 
         is_default=True
     ).first()
     
