@@ -2786,7 +2786,7 @@ def start_support_chat():
     
     if not support_agent:
         flash('No support agents are currently available. Please try again later.', 'warning')
-        return redirect(request.referrer or url_for('customer_dashboard'))
+        return redirect(request.referrer or url_for('index'))
     
     # Create new support conversation
     conversation = Conversation(
@@ -2813,7 +2813,7 @@ def support_conversation(conversation_id):
     # Verify access
     if user.id not in [conversation.user1_id, conversation.user2_id]:
         flash('You do not have access to this conversation.', 'danger')
-        return redirect(url_for('customer_dashboard'))
+        return redirect(url_for('index'))
     
     # Mark messages as read
     Message.query.filter(
@@ -2883,7 +2883,7 @@ def support_dashboard():
     
     if not user.is_support_agent and user.role != 'admin':
         flash('You do not have access to the support dashboard.', 'danger')
-        return redirect(url_for('customer_dashboard'))
+        return redirect(url_for('index'))
     
     # Get all support conversations
     conversations = Conversation.query.filter_by(
