@@ -48,13 +48,22 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.Enum('admin', 'seller', 'customer', 'courier', 'rider'), nullable=False)
     is_verified = db.Column(db.Boolean, default=False)
+    verification_code = db.Column(db.String(10))  # Email verification code
+    verification_code_expires = db.Column(db.DateTime)  # Verification code expiry
     is_approved = db.Column(db.Boolean, default=True)  # Admin approval for sellers/couriers/riders
+    is_suspended = db.Column(db.Boolean, default=False)  # Account suspension
+    suspension_reason = db.Column(db.Text)  # Reason for suspension
     full_name = db.Column(db.String(100))
     first_name = db.Column(db.String(50))
     middle_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50))
     phone = db.Column(db.String(20))
     id_document = db.Column(db.String(255))  # File path for uploaded ID
+    business_permit = db.Column(db.String(255))  # Business permit for sellers
+    drivers_license = db.Column(db.String(255))  # Driver's license for riders/couriers
+    or_cr = db.Column(db.String(255))  # OR/CR for riders/couriers
+    plate_number = db.Column(db.String(50))  # Plate number for riders/couriers
+    vehicle_type = db.Column(db.String(50))  # Vehicle type for riders/couriers
     profile_picture = db.Column(db.String(255))  # Profile picture/business icon
     is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
@@ -64,6 +73,7 @@ class User(db.Model):
     shop = db.relationship('Shop', backref='owner', uselist=False, cascade='all, delete-orphan')
     addresses = db.relationship('Address', backref='user', cascade='all, delete-orphan')
     orders = db.relationship('Order', backref='customer', foreign_keys='Order.customer_id')
+    cart_items = db.relationship('CartItem', backref='user', cascade='all, delete-orphan')
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -112,6 +122,18 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class CartItem(db.Model):
+    """Transaction-based cart - each add creates a separate entry"""
+    __tablename__ = 'cart_items'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    product = db.relationship('Product')
+
 
 class Address(db.Model):
     __tablename__ = 'addresses'
@@ -124,6 +146,9 @@ class Address(db.Model):
     municipality = db.Column(db.String(100))
     city = db.Column(db.String(100))
     barangay = db.Column(db.String(100))
+    street = db.Column(db.String(255))  # Street name
+    block = db.Column(db.String(50))  # Block number
+    lot = db.Column(db.String(50))  # Lot number
     postal_code = db.Column(db.String(20))
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -150,6 +175,10 @@ class Order(db.Model):
     commission_rate = db.Column(Numeric(5, 2), default=5.00)  # 5% commission
     commission_amount = db.Column(Numeric(10, 2), default=0.00)
     seller_amount = db.Column(Numeric(10, 2), default=0.00)
+    courier_earnings = db.Column(Numeric(10, 2), default=0.00)  # Courier's share of delivery fee
+    rider_earnings = db.Column(Numeric(10, 2), default=0.00)  # Rider's share of delivery fee
+    shipping_fee_split_courier = db.Column(Numeric(5, 2), default=60.00)  # 60% to courier
+    shipping_fee_split_rider = db.Column(Numeric(5, 2), default=40.00)  # 40% to rider
 
     # QR Tokens
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
@@ -224,7 +253,7 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin'), nullable=False)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
