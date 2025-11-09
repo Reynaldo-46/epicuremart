@@ -698,6 +698,12 @@ def login():
                 flash('Please verify your email before logging in.', 'warning')
                 return redirect(url_for('login'))
             
+            # Check if account is suspended
+            if user.is_suspended:
+                reason = user.suspension_reason or 'No reason provided'
+                flash(f'Your account has been suspended. Reason: {reason}', 'danger')
+                return redirect(url_for('login'))
+            
             session['user_id'] = user.id
             session['role'] = user.role
             session['profile_picture'] = user.profile_picture  # Add profile picture to session
@@ -2263,6 +2269,85 @@ def admin_users():
         role_filter=role_filter,
         role_counts=role_counts
     )
+
+
+@app.route('/admin/user/suspend/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def suspend_user(user_id):
+    """Suspend a user account"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot suspend admin accounts.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    reason = request.form.get('reason', 'Account suspended by admin')
+    
+    user.is_suspended = True
+    user.suspension_reason = reason
+    db.session.commit()
+    
+    log_action('USER_SUSPENDED', 'User', user.id, f'Suspended: {reason}')
+    
+    # Send email notification
+    send_email(
+        user.email,
+        'Account Suspended',
+        f'Your account has been suspended.\nReason: {reason}\n\nPlease contact support if you have questions.'
+    )
+    
+    flash(f'User account suspended successfully.', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/unsuspend/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def unsuspend_user(user_id):
+    """Unsuspend a user account"""
+    user = User.query.get_or_404(user_id)
+    
+    user.is_suspended = False
+    user.suspension_reason = None
+    db.session.commit()
+    
+    log_action('USER_UNSUSPENDED', 'User', user.id, 'Account reactivated')
+    
+    # Send email notification
+    send_email(
+        user.email,
+        'Account Reactivated',
+        'Your account has been reactivated. You can now log in and use all features.'
+    )
+    
+    flash(f'User account reactivated successfully.', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/delete/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def delete_user(user_id):
+    """Delete a user account and all associated data"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot delete admin accounts.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    user_email = user.email
+    user_name = user.full_name
+    user_role = user.role
+    
+    # Delete user (cascading will handle related records)
+    db.session.delete(user)
+    db.session.commit()
+    
+    log_action('USER_DELETED', 'User', user_id, f'Deleted {user_role}: {user_name}')
+    
+    flash(f'User account "{user_name}" deleted successfully.', 'info')
+    return redirect(url_for('admin_users'))
 
 
 @app.route('/admin/categories', methods=['GET', 'POST'])

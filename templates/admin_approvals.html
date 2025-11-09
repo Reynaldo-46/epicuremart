@@ -7,33 +7,100 @@
     {% if pending_users %}
     <div class="row">
         {% for user in pending_users %}
-        <div class="col-md-6 col-lg-4 mb-4">
-            <div class="card">
-                <div class="card-body">
-                    <h5 class="card-title">{{ user.full_name }}</h5>
-                    <p class="mb-1"><strong>Email:</strong> {{ user.email }}</p>
-                    <p class="mb-1"><strong>Phone:</strong> {{ user.phone }}</p>
-                    <p class="mb-3">
+        <div class="col-md-12 col-lg-6 mb-4">
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">{{ user.full_name }}</h5>
                         <span class="badge 
                             {% if user.role == 'seller' %}bg-primary
                             {% elif user.role == 'courier' %}bg-info
                             {% elif user.role == 'rider' %}bg-warning
-                            {% endif %}">
+                            {% endif %} px-3 py-2">
                             {{ user.role|capitalize }}
                         </span>
-                    </p>
-                    <p class="small text-muted">Registered: {{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- User Information -->
+                    <div class="mb-3">
+                        <p class="mb-1"><strong><i class="fas fa-envelope me-2"></i>Email:</strong> {{ user.email }}</p>
+                        {% if user.phone %}
+                        <p class="mb-1"><strong><i class="fas fa-phone me-2"></i>Phone:</strong> {{ user.phone }}</p>
+                        {% endif %}
+                        {% if user.plate_number %}
+                        <p class="mb-1"><strong><i class="fas fa-car me-2"></i>Plate Number:</strong> {{ user.plate_number }}</p>
+                        {% endif %}
+                        {% if user.vehicle_type %}
+                        <p class="mb-1"><strong><i class="fas fa-motorcycle me-2"></i>Vehicle:</strong> {{ user.vehicle_type|capitalize }}</p>
+                        {% endif %}
+                        <p class="small text-muted mb-0"><i class="fas fa-clock me-2"></i>Registered: {{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                    </div>
                     
-                    <div class="d-grid gap-2">
+                    <!-- Verification Documents Section -->
+                    <div class="documents-section">
+                        <h6 class="fw-bold mb-3 text-primary">
+                            <i class="fas fa-file-alt me-2"></i>Verification Documents
+                        </h6>
+                        
+                        {% if user.id_document %}
+                        <div class="mb-3">
+                            <p class="mb-1 fw-semibold"><i class="fas fa-id-card me-2"></i>Valid ID</p>
+                            <a href="{{ url_for('static', filename='uploads/' + user.id_document) }}" 
+                               target="_blank" 
+                               class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-external-link-alt me-1"></i>View Document
+                            </a>
+                        </div>
+                        {% endif %}
+                        
+                        {% if user.role == 'seller' and user.business_permit %}
+                        <div class="mb-3">
+                            <p class="mb-1 fw-semibold"><i class="fas fa-certificate me-2"></i>Business Permit</p>
+                            <a href="{{ url_for('static', filename='uploads/' + user.business_permit) }}" 
+                               target="_blank" 
+                               class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-external-link-alt me-1"></i>View Document
+                            </a>
+                        </div>
+                        {% endif %}
+                        
+                        {% if user.role in ['rider', 'courier'] %}
+                            {% if user.drivers_license %}
+                            <div class="mb-3">
+                                <p class="mb-1 fw-semibold"><i class="fas fa-id-badge me-2"></i>Driver's License</p>
+                                <a href="{{ url_for('static', filename='uploads/' + user.drivers_license) }}" 
+                                   target="_blank" 
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-external-link-alt me-1"></i>View Document
+                                </a>
+                            </div>
+                            {% endif %}
+                            
+                            {% if user.or_cr %}
+                            <div class="mb-3">
+                                <p class="mb-1 fw-semibold"><i class="fas fa-file-contract me-2"></i>OR/CR</p>
+                                <a href="{{ url_for('static', filename='uploads/' + user.or_cr) }}" 
+                                   target="_blank" 
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-external-link-alt me-1"></i>View Document
+                                </a>
+                            </div>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="d-grid gap-2 mt-4">
                         <form method="POST" action="{{ url_for('approve_user', user_id=user.id) }}" style="display:inline;">
                             <button type="submit" class="btn btn-success w-100">
-                                <i class="fas fa-check"></i> Approve
+                                <i class="fas fa-check me-2"></i>Approve Account
                             </button>
                         </form>
                         <form method="POST" action="{{ url_for('reject_user', user_id=user.id) }}" 
-                              onsubmit="return confirm('Are you sure you want to reject this user?');" style="display:inline;">
+                              onsubmit="return confirm('Are you sure you want to reject and delete this user account?');" style="display:inline;">
                             <button type="submit" class="btn btn-danger w-100">
-                                <i class="fas fa-times"></i> Reject
+                                <i class="fas fa-times me-2"></i>Reject & Delete
                             </button>
                         </form>
                     </div>
@@ -48,4 +115,13 @@
     </div>
     {% endif %}
 </div>
+
+<style>
+.documents-section {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 4px solid #0d6efd;
+}
+</style>
 {% endblock %}
