@@ -433,11 +433,16 @@ def register():
         region = request.form.get('region')
         province = request.form.get('province')
         municipality = request.form.get('municipality')
-        city = request.form.get('city')
         barangay = request.form.get('barangay')
+        postal_code = request.form.get('postal_code', '')
         street = request.form.get('street', '')
         block = request.form.get('block', '')
         lot = request.form.get('lot', '')
+        
+        # Validate postal code (must be exactly 4 digits)
+        if postal_code and not (postal_code.isdigit() and len(postal_code) == 4):
+            flash('Postal code must be exactly 4 digits.', 'danger')
+            return redirect(url_for('register'))
         
         # Rider/Courier specific fields
         plate_number = request.form.get('plate_number', '')
@@ -562,7 +567,7 @@ def register():
                 full_address_parts.append(f"Block {block}")
             if street:
                 full_address_parts.append(street)
-            full_address_parts.extend([barangay, city or municipality, province, region])
+            full_address_parts.extend([barangay, municipality, province, region])
             full_address = ", ".join(full_address_parts)
             
             address = Address(
@@ -572,8 +577,8 @@ def register():
                 region=region,
                 province=province,
                 municipality=municipality,
-                city=city,
                 barangay=barangay,
+                postal_code=postal_code,
                 street=street,
                 block=block,
                 lot=lot,

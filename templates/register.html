@@ -133,10 +133,10 @@
                                 </select>
                             </div>
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">City *</label>
-                                <select name="city" class="form-select" id="citySelect" required disabled>
-                                    <option value="">-- Select City --</option>
-                                </select>
+                                <label class="form-label">Postal Code *</label>
+                                <input type="text" name="postal_code" class="form-control" id="postalCodeInput"
+                                       placeholder="4 digits" required pattern="\d{4}" maxlength="4">
+                                <small class="form-text text-muted">Enter exactly 4 digits</small>
                             </div>
                         </div>
 
@@ -235,14 +235,11 @@ function populateProvinces() {
 document.getElementById('provinceSelect').addEventListener('change', function() {
     const province = this.value;
     const municipalitySelect = document.getElementById('municipalitySelect');
-    const citySelect = document.getElementById('citySelect');
     const barangaySelect = document.getElementById('barangaySelect');
     
     // Reset dependent dropdowns
     municipalitySelect.innerHTML = '<option value="">-- Select Municipality --</option>';
-    citySelect.innerHTML = '<option value="">-- Select City --</option>';
     barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
-    citySelect.disabled = true;
     barangaySelect.disabled = true;
     
     if (province && addressData.provinces[province]) {
@@ -262,52 +259,26 @@ document.getElementById('provinceSelect').addEventListener('change', function() 
 document.getElementById('municipalitySelect').addEventListener('change', function() {
     const province = document.getElementById('provinceSelect').value;
     const municipality = this.value;
-    const citySelect = document.getElementById('citySelect');
-    const barangaySelect = document.getElementById('barangaySelect');
-    
-    // Reset dependent dropdowns
-    citySelect.innerHTML = '<option value="">-- Select City --</option>';
-    barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
-    barangaySelect.disabled = true;
-    
-    if (municipality && addressData.provinces[province].municipalities[municipality]) {
-        const municipalityData = addressData.provinces[province].municipalities[municipality];
-        
-        // Populate cities
-        if (municipalityData.cities) {
-            municipalityData.cities.forEach(city => {
-                const option = document.createElement('option');
-                option.value = city;
-                option.textContent = city;
-                citySelect.appendChild(option);
-            });
-        }
-        citySelect.disabled = false;
-    } else {
-        citySelect.disabled = true;
-    }
-});
-
-document.getElementById('citySelect').addEventListener('change', function() {
-    const province = document.getElementById('provinceSelect').value;
-    const municipality = document.getElementById('municipalitySelect').value;
     const barangaySelect = document.getElementById('barangaySelect');
     
     // Reset barangay dropdown
     barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
     
     if (municipality && addressData.provinces[province].municipalities[municipality]) {
-        const barangays = addressData.provinces[province].municipalities[municipality].barangays;
+        const municipalityData = addressData.provinces[province].municipalities[municipality];
         
-        if (barangays) {
-            barangays.forEach(barangay => {
+        // Populate barangays directly from municipality
+        if (municipalityData.barangays) {
+            municipalityData.barangays.forEach(barangay => {
                 const option = document.createElement('option');
                 option.value = barangay;
                 option.textContent = barangay;
                 barangaySelect.appendChild(option);
             });
+            barangaySelect.disabled = false;
         }
-        barangaySelect.disabled = false;
+    } else {
+        barangaySelect.disabled = true;
     }
 });
 
