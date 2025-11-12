@@ -2540,8 +2540,41 @@ def delete_category(category_id):
 @login_required
 @role_required('admin')
 def admin_orders():
-    orders = Order.query.order_by(Order.created_at.desc()).all()
-    return render_template('admin_orders.html', orders=orders)
+    # Get sort parameters
+    sort_by = request.args.get('sort', 'date')
+    direction = request.args.get('direction', 'desc')
+    
+    # Base query
+    query = Order.query
+    
+    # Apply sorting
+    if sort_by == 'order_number':
+        if direction == 'asc':
+            query = query.order_by(Order.order_number.asc())
+        else:
+            query = query.order_by(Order.order_number.desc())
+    elif sort_by == 'shop':
+        query = query.join(Shop).order_by(Shop.name.asc() if direction == 'asc' else Shop.name.desc())
+    elif sort_by == 'customer':
+        query = query.join(User, Order.customer_id == User.id).order_by(User.full_name.asc() if direction == 'asc' else User.full_name.desc())
+    elif sort_by == 'amount':
+        if direction == 'asc':
+            query = query.order_by(Order.total_amount.asc())
+        else:
+            query = query.order_by(Order.total_amount.desc())
+    elif sort_by == 'status':
+        if direction == 'asc':
+            query = query.order_by(Order.status.asc())
+        else:
+            query = query.order_by(Order.status.desc())
+    else:  # date (default)
+        if direction == 'asc':
+            query = query.order_by(Order.created_at.asc())
+        else:
+            query = query.order_by(Order.created_at.desc())
+    
+    orders = query.all()
+    return render_template('admin_orders.html', orders=orders, sort_by=sort_by, direction=direction)
 
 
 @app.route('/admin/analytics')
@@ -2571,13 +2604,60 @@ def admin_analytics():
     ).join(OrderItem).group_by(Product.id)\
         .order_by(func.sum(OrderItem.quantity).desc()).limit(10).all()
     
+    # Get seller-specific earnings with sorting
+    sort_by = request.args.get('sort', 'earnings')
+    direction = request.args.get('direction', 'desc')
+    
+    seller_earnings_query = db.session.query(
+        User.id,
+        User.full_name,
+        Shop.name.label('shop_name'),
+        func.count(Order.id).label('total_orders'),
+        func.sum(Order.total_amount).label('total_revenue'),
+        func.sum(Order.commission_amount).label('total_commission'),
+        func.sum(Order.seller_amount).label('total_earnings')
+    ).join(Shop, User.id == Shop.seller_id)\
+     .join(Order, Shop.id == Order.shop_id)\
+     .filter(Order.status == 'DELIVERED')\
+     .group_by(User.id, User.full_name, Shop.name)
+    
+    # Apply sorting
+    if sort_by == 'seller':
+        seller_earnings_query = seller_earnings_query.order_by(
+            User.full_name.asc() if direction == 'asc' else User.full_name.desc()
+        )
+    elif sort_by == 'shop':
+        seller_earnings_query = seller_earnings_query.order_by(
+            Shop.name.asc() if direction == 'asc' else Shop.name.desc()
+        )
+    elif sort_by == 'orders':
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.count(Order.id).asc() if direction == 'asc' else func.count(Order.id).desc()
+        )
+    elif sort_by == 'revenue':
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.sum(Order.total_amount).asc() if direction == 'asc' else func.sum(Order.total_amount).desc()
+        )
+    elif sort_by == 'commission':
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.sum(Order.commission_amount).asc() if direction == 'asc' else func.sum(Order.commission_amount).desc()
+        )
+    else:  # earnings (default)
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.sum(Order.seller_amount).asc() if direction == 'asc' else func.sum(Order.seller_amount).desc()
+        )
+    
+    seller_earnings_data = seller_earnings_query.all()
     
     return render_template('admin_analytics.html',
         total_revenue=total_revenue,
         total_commission=total_commission,
         seller_earnings=seller_earnings,
         orders_by_status=orders_by_status,
-        top_products=top_products
+        top_products=top_products,
+        seller_earnings_data=seller_earnings_data,
+        sort_by=sort_by,
+        direction=direction
     )
 
 
