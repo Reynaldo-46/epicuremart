@@ -1636,6 +1636,17 @@ def seller_dashboard():
     recent_orders = Order.query.filter_by(shop_id=user.shop.id)\
         .order_by(Order.created_at.desc()).limit(5).all()
     
+    # Withdrawal calculations (all time - for accurate accounting)
+    # Total sales (subtotal) from delivered orders
+    total_delivered_sales = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Commission calculation (5% of subtotal)
+    admin_commission = total_delivered_sales * 0.05
+    
+    # Withdrawable amount (95% of subtotal = seller earnings)
+    withdrawable_amount = total_delivered_sales * 0.95
+    
     return render_template('seller_dashboard.html',
         shop=user.shop,
         total_products=total_products,
@@ -1648,6 +1659,10 @@ def seller_dashboard():
         revenue_chart_data=revenue_chart_data,
         top_products=top_products,
         time_filter=time_filter,
+        # Withdrawal data
+        total_delivered_sales=total_delivered_sales,
+        admin_commission=admin_commission,
+        withdrawable_amount=withdrawable_amount,
         start_date=start_date_str,
         end_date=end_date_str,
         recent_orders=recent_orders
