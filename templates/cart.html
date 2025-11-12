@@ -12,10 +12,30 @@
     {% if cart_items %}
     <div class="row">
         <div class="col-lg-8">
+            <!-- Select All Checkbox -->
+            <div class="card mb-3 bg-light">
+                <div class="card-body py-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="selectAllCheckbox">
+                        <label class="form-check-label fw-bold" for="selectAllCheckbox">
+                            Select All Items
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
             {% for item in cart_items %}
             <div class="card mb-3 {% if item.exceeds_stock %}border-danger{% endif %}" id="cart-item-{{ item.cart_item_id }}">
                 <div class="card-body">
                     <div class="row align-items-center">
+                        <div class="col-auto">
+                            <input class="form-check-input cart-item-checkbox" 
+                                   type="checkbox" 
+                                   value="{{ item.cart_item_id }}"
+                                   data-price="{{ item.subtotal }}"
+                                   data-exceeds-stock="{{ 'true' if item.exceeds_stock else 'false' }}"
+                                   id="checkbox-{{ item.cart_item_id }}">
+                        </div>
                         <div class="col-md-2">
                             {% if item.product.image %}
                             <img src="{{ url_for('static', filename='uploads/' + item.product.image) }}" class="img-fluid rounded" alt="{{ item.product.name }}">
@@ -25,7 +45,7 @@
                             </div>
                             {% endif %}
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <h5>{{ item.product.name }}</h5>
                             <p class="text-muted mb-0">{{ item.product.shop.name }}</p>
                             <small class="text-muted">Stock: {{ item.product.stock }}</small>
@@ -75,26 +95,33 @@
                     <h4>Order Summary</h4>
                     <hr>
                     <div class="d-flex justify-content-between mb-2">
-                        <span>Cart Items (transactions):</span>
-                        <span class="badge bg-primary">{{ cart_items|length }}</span>
+                        <span>Total Items:</span>
+                        <span class="badge bg-secondary">{{ cart_items|length }}</span>
                     </div>
                     <div class="d-flex justify-content-between mb-2">
-                        <span>Subtotal:</span>
-                        <span>₱<span id="cart-total">{{ "%.2f"|format(total) }}</span></span>
+                        <span>Selected Items:</span>
+                        <span class="badge bg-primary" id="selected-count">0</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Selected Subtotal:</span>
+                        <span>₱<span id="selected-total">0.00</span></span>
                     </div>
                     <div class="d-flex justify-content-between mb-3">
                         <span class="fw-bold">Total:</span>
-                        <span class="fw-bold h4">₱<span id="cart-total-display">{{ "%.2f"|format(total) }}</span></span>
+                        <span class="fw-bold h4">₱<span id="cart-total-display">0.00</span></span>
                     </div>
-                    {% if has_stock_error %}
-                    <button class="btn btn-secondary w-100" disabled title="Fix stock issues first">
-                        <i class="fas fa-exclamation-triangle"></i> Cannot Checkout - Stock Issues
-                    </button>
-                    {% else %}
-                    <a href="{{ url_for('checkout') }}" class="btn btn-primary w-100">
-                        <i class="fas fa-credit-card"></i> Proceed to Checkout
-                    </a>
-                    {% endif %}
+                    
+                    <div id="stock-error-alert" class="alert alert-danger d-none mb-3">
+                        <i class="fas fa-exclamation-triangle"></i> Selected items contain stock issues
+                    </div>
+                    
+                    <form id="checkout-form" method="POST" action="{{ url_for('checkout') }}">
+                        <input type="hidden" name="selected_items" id="selected-items-input" value="">
+                        <button type="submit" id="checkout-btn" class="btn btn-primary w-100" disabled>
+                            <i class="fas fa-credit-card"></i> Proceed to Checkout (<span id="checkout-count">0</span> items)
+                        </button>
+                    </form>
+                    
                     <a href="{{ url_for('browse') }}" class="btn btn-outline-secondary w-100 mt-2">
                         <i class="fas fa-arrow-left"></i> Continue Shopping
                     </a>
@@ -144,6 +171,75 @@ function updateCartTotal() {
     document.getElementById('cart-total').textContent = total.toFixed(2);
     document.getElementById('cart-total-display').textContent = total.toFixed(2);
 }
+
+// Selective Checkout Functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const checkboxes = document.querySelectorAll('.cart-item-checkbox');
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    const checkoutBtn = document.getElementById('checkout-btn');
+    const selectedItemsInput = document.getElementById('selected-items-input');
+    const stockErrorAlert = document.getElementById('stock-error-alert');
+    
+    // Update selection summary
+    function updateSelectionSummary() {
+        const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
+        const selectedCount = checkedBoxes.length;
+        let selectedTotal = 0;
+        let hasStockError = false;
+        
+        checkedBoxes.forEach(checkbox => {
+            selectedTotal += parseFloat(checkbox.dataset.price) || 0;
+            if (checkbox.dataset.exceedsStock === 'true') {
+                hasStockError = true;
+            }
+        });
+        
+        // Update UI
+        document.getElementById('selected-count').textContent = selectedCount;
+        document.getElementById('selected-total').textContent = selectedTotal.toFixed(2);
+        document.getElementById('cart-total-display').textContent = selectedTotal.toFixed(2);
+        document.getElementById('checkout-count').textContent = selectedCount;
+        
+        // Enable/disable checkout button
+        if (selectedCount === 0) {
+            checkoutBtn.disabled = true;
+            stockErrorAlert.classList.add('d-none');
+        } else if (hasStockError) {
+            checkoutBtn.disabled = true;
+            stockErrorAlert.classList.remove('d-none');
+        } else {
+            checkoutBtn.disabled = false;
+            stockErrorAlert.classList.add('d-none');
+        }
+        
+        // Update hidden input with selected cart item IDs
+        const selectedIds = checkedBoxes.map(cb => cb.value).join(',');
+        selectedItemsInput.value = selectedIds;
+    }
+    
+    // Handle individual checkbox change
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            updateSelectionSummary();
+            // Update select all checkbox state
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            selectAllCheckbox.checked = allChecked;
+        });
+    });
+    
+    // Handle select all checkbox
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+            updateSelectionSummary();
+        });
+    }
+    
+    // Initialize
+    updateSelectionSummary();
+});
 </script>
 
 <style>

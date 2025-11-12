@@ -1119,27 +1119,64 @@ def delete_profile_picture():
 def checkout():
     user_id = session['user_id']
     
-    # Get cart items from database
-    cart_items_db = CartItem.query.filter_by(user_id=user_id).all()
+    # Check if this is a Buy Now transaction
+    buy_now_cart = session.get('buy_now_cart', None)
+    
+    if buy_now_cart:
+        # Buy Now: Create temporary cart items list
+        cart_items_db = []
+        for product_id_str, quantity in buy_now_cart.items():
+            product = Product.query.get(int(product_id_str))
+            if product:
+                # Create a temporary cart item object (not saved to database)
+                class TempCartItem:
+                    def __init__(self, product, quantity):
+                        self.product = product
+                        self.quantity = quantity
+                        self.id = f"buy_now_{product.id}"
+                
+                cart_items_db.append(TempCartItem(product, quantity))
+    else:
+        # Regular cart checkout: Handle selective checkout from cart (POST with selected_items)
+        selected_item_ids = request.form.get('selected_items', '').strip()
+        
+        # If coming from cart with selected items
+        if request.method == 'POST' and selected_item_ids:
+            # Store selected items in session for GET request
+            session['selected_cart_items'] = selected_item_ids
+            return redirect(url_for('checkout'))
+        
+        # Get selected items from session or all cart items
+        if 'selected_cart_items' in session and session['selected_cart_items']:
+            selected_ids = [int(id) for id in session['selected_cart_items'].split(',') if id]
+            cart_items_db = CartItem.query.filter(
+                CartItem.user_id == user_id,
+                CartItem.id.in_(selected_ids)
+            ).all()
+        else:
+            # Default to all cart items (for backward compatibility)
+            cart_items_db = CartItem.query.filter_by(user_id=user_id).all()
     
     if not cart_items_db:
-        flash('Your cart is empty.', 'warning')
+        flash('Your cart is empty or no items selected.', 'warning')
         return redirect(url_for('browse'))
     
-    # Check if any item exceeds stock before allowing checkout
+    # Check if any selected item exceeds stock before allowing checkout
     has_stock_error = False
     for cart_item in cart_items_db:
         if cart_item.quantity > cart_item.product.stock:
             has_stock_error = True
-            break
+            flash(f'{cart_item.product.name} exceeds available stock.', 'danger')
     
     if has_stock_error:
-        flash('One or more items exceed available stock. Please adjust your cart before checking out.', 'danger')
+        # Clear selection and redirect
+        session.pop('selected_cart_items', None)
+        session.pop('buy_now_cart', None)
         return redirect(url_for('view_cart'))
     
     addresses = Address.query.filter_by(user_id=user_id).all()
     
-    if request.method == 'POST':
+    if request.method == 'POST' and request.form.get('address_id'):
         address_id = request.form.get('address_id')
         
         if not address_id:
@@ -1157,23 +1194,29 @@ def checkout():
             product = cart_item.product
             if not product:
                 flash(f'Product not found.', 'danger')
+                session.pop('selected_cart_items', None)
+                session.pop('buy_now_cart', None)
                 return redirect(url_for('view_cart'))
             
             if product.stock < cart_item.quantity:
                 flash(f'Insufficient stock for {product.name}. Only {product.stock} available.', 'danger')
+                session.pop('selected_cart_items', None)
+                session.pop('buy_now_cart', None)
                 return redirect(url_for('view_cart'))
             
             if product.stock == 0:
                 flash(f'{product.name} is out of stock.', 'danger')
+                session.pop('selected_cart_items', None)
+                session.pop('buy_now_cart', None)
                 return redirect(url_for('view_cart'))
         
         # Calculate delivery fee based on address
         delivery_fee_obj = DeliveryFee.query.filter_by(
-            city=delivery_address.city
+            province=delivery_address.province
         ).first()
         
-        if not delivery_fee_obj and delivery_address.province:
-            # Try to find by province if city not found
+        if not delivery_fee_obj and delivery_address.municipality:
+            # Try to find by municipality if province not found
             delivery_fee_obj = DeliveryFee.query.filter_by(
                 province=delivery_address.province
             ).first()
@@ -1240,9 +1283,18 @@ def checkout():
             
             log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
         
-        # Clear cart items from database
-        CartItem.query.filter_by(user_id=user_id).delete()
-        db.session.commit()
+        # Clear cart items based on checkout type
+        if buy_now_cart:
+            # Clear Buy Now session
+            session.pop('buy_now_cart', None)
+        else:
+            # Clear only the checked-out cart items from database
+            for cart_item in cart_items_db:
+                db.session.delete(cart_item)
+            db.session.commit()
+            
+            # Clear selected items from session
+            session.pop('selected_cart_items', None)
         
         # Send confirmation email
         user = User.query.get(user_id)
