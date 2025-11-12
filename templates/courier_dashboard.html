@@ -51,6 +51,47 @@
         <p class="mb-0"><strong>Example:</strong> Shipping Fee ₱100 → <span class="text-success fw-bold">Courier earns ₱60</span> | Rider earns ₱40</p>
     </div>
 
+    <!-- Withdrawal Information -->
+    <div class="card mb-4 border-success">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0"><i class="fas fa-money-bill-wave"></i> Withdrawal Information</h5>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <p class="mb-0"><i class="fas fa-info-circle"></i> <strong>Note:</strong> As a courier, you earn 60% of the shipping fee. For every ₱100 in shipping fees, you earn ₱60 and ₱40 goes to the rider.</p>
+            </div>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="card bg-light">
+                        <div class="card-body text-center">
+                            <p class="text-muted mb-1"><i class="fas fa-shipping-fast"></i> Total Delivery Fees</p>
+                            <h4 class="mb-0 text-primary">₱{{ "%.2f"|format(total_delivery_fees) }}</h4>
+                            <small class="text-muted">From completed deliveries</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-light">
+                        <div class="card-body text-center">
+                            <p class="text-muted mb-1"><i class="fas fa-percentage"></i> Rider Share (40%)</p>
+                            <h4 class="mb-0 text-danger">₱{{ "%.2f"|format(courier_commission) }}</h4>
+                            <small class="text-muted">Goes to riders</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card bg-success text-white">
+                        <div class="card-body text-center">
+                            <p class="mb-1"><i class="fas fa-wallet"></i> <strong>Available to Withdraw</strong></p>
+                            <h3 class="mb-0">₱{{ "%.2f"|format(available_to_withdraw) }}</h3>
+                            <small>Your earnings (60%)</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Quick Actions -->
     <div class="row mb-4">
         <div class="col-12">

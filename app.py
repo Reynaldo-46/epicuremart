@@ -1964,13 +1964,24 @@ def courier_dashboard():
         .filter(Order.courier_id == user_id, 
                 Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'])).scalar() or 0
     
+    # Withdrawal information - total delivery fees from completed orders
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Courier gets 60% of delivery fees
+    courier_commission = total_delivery_fees * 0.40  # Platform keeps 40%
+    available_to_withdraw = total_earnings  # Already calculated as 60% of delivery fees
+    
     return render_template('courier_dashboard.html', 
         available_orders=available_orders,
         my_orders=my_orders,
         total_deliveries=total_deliveries,
         pending_deliveries=pending_deliveries,
         total_earnings=total_earnings,
-        pending_earnings=pending_earnings
+        pending_earnings=pending_earnings,
+        total_delivery_fees=total_delivery_fees,
+        courier_commission=courier_commission,
+        available_to_withdraw=available_to_withdraw
     )
 
 
@@ -2074,13 +2085,24 @@ def rider_dashboard():
     pending_earnings = db.session.query(func.sum(Order.rider_earnings))\
         .filter(Order.rider_id == user_id, Order.status == 'OUT_FOR_DELIVERY').scalar() or 0
     
+    # Withdrawal information - total delivery fees from completed orders
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Rider gets 40% of delivery fees
+    rider_commission = total_delivery_fees * 0.60  # Platform keeps 60% (or shares with courier)
+    available_to_withdraw = total_earnings  # Already calculated as 40% of delivery fees
+    
     return render_template('rider_dashboard.html',
         available_orders=available_orders,
         my_orders=my_orders,
         total_deliveries=total_deliveries,
         pending_deliveries=pending_deliveries,
         total_earnings=total_earnings,
-        pending_earnings=pending_earnings
+        pending_earnings=pending_earnings,
+        total_delivery_fees=total_delivery_fees,
+        rider_commission=rider_commission,
+        available_to_withdraw=available_to_withdraw
     )
 
 
