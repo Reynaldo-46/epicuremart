@@ -3057,12 +3057,15 @@ def start_support_chat():
 @app.route('/support/conversation/<int:conversation_id>')
 @login_required
 def support_conversation(conversation_id):
-    """View support conversation (for both users and agents)"""
+    """View support conversation (for both users, agents, and admins)"""
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Verify access
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Verify access - allow admins, support agents, and conversation participants
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
+    
+    if not (is_participant or is_admin):
         flash('You do not have access to this conversation.', 'danger')
         return redirect(url_for('index'))
     
@@ -3074,19 +3077,33 @@ def support_conversation(conversation_id):
     ).update({'is_read': True})
     db.session.commit()
     
-    # Get other user
-    other_user = conversation.user1 if conversation.user2_id == user.id else conversation.user2
+    # Get other user - for admins viewing conversations
+    if is_admin and not is_participant:
+        # Admin is viewing a conversation they're not part of
+        # Identify the customer (user1) and support agent (user2)
+        customer = conversation.user1
+        support_agent = conversation.user2
+        other_user = customer  # Default to showing customer info
+    else:
+        other_user = conversation.user1 if conversation.user2_id == user.id else conversation.user2
     
-    # Update last activity for support agents
-    if user.is_support_agent:
+    # Update last activity for support agents and admins
+    if user.is_support_agent or user.role == 'admin':
         user.last_activity = datetime.utcnow()
         db.session.commit()
+    
+    # Log admin access to conversation
+    if is_admin and not is_participant:
+        log_action('ADMIN_VIEW_SUPPORT_CHAT', 'Conversation', conversation.id, 
+                  f'Admin viewed support conversation between {conversation.user1.full_name or conversation.user1.email} and {conversation.user2.full_name or conversation.user2.email}')
     
     return render_template('support_conversation.html',
         conversation=conversation,
         other_user=other_user,
         messages=conversation.messages,
-        now=datetime.utcnow
+        now=datetime.utcnow,
+        current_user=user,
+        is_admin=is_admin
     )
 
 
@@ -3097,8 +3114,11 @@ def send_support_message(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Verify access
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Verify access - allow admins, support agents, and conversation participants
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
+    
+    if not (is_participant or is_admin):
         return jsonify({'success': False, 'error': 'Access denied'}), 403
     
     message_text = request.form.get('message_text', '').strip()
@@ -3118,10 +3138,15 @@ def send_support_message(conversation_id):
     conversation.last_message_at = datetime.utcnow()
     db.session.commit()
     
-    # Update last activity for support agents
-    if user.is_support_agent:
+    # Update last activity for support agents and admins
+    if user.is_support_agent or user.role == 'admin':
         user.last_activity = datetime.utcnow()
         db.session.commit()
+    
+    # Log admin participation in conversation
+    if is_admin and not is_participant:
+        log_action('ADMIN_SEND_SUPPORT_MESSAGE', 'Message', message.id, 
+                  f'Admin sent message in support conversation {conversation_id}')
     
     return jsonify({'success': True, 'message_id': message.id})
 
@@ -3216,7 +3241,8 @@ def manage_support_agents():
     
     return render_template('admin_support_agents.html',
         support_agents=support_agents,
-        all_users=all_users
+        all_users=all_users,
+        now=datetime.utcnow()
     )
 
 
@@ -3226,19 +3252,100 @@ def manage_support_agents():
 def toggle_support_agent(user_id):
     """Toggle support agent status for a user"""
     user = User.query.get_or_404(user_id)
+    admin = User.query.get(session['user_id'])
     
     if user.role == 'admin':
         flash('Cannot modify admin users.', 'danger')
         return redirect(url_for('manage_support_agents'))
     
+    # Validation: Check if user is verified
+    if not user.is_verified:
+        flash(f'Cannot assign support agent role to unverified user {user.full_name or user.email}.', 'danger')
+        return redirect(url_for('manage_support_agents'))
+    
+    # Validation: Check if user is approved
+    if not user.is_approved:
+        flash(f'Cannot assign support agent role to unapproved user {user.full_name or user.email}.', 'danger')
+        return redirect(url_for('manage_support_agents'))
+    
+    # Validation: Check if user is suspended
+    if user.is_suspended:
+        flash(f'Cannot assign support agent role to suspended user {user.full_name or user.email}.', 'danger')
+        return redirect(url_for('manage_support_agents'))
+    
+    old_status = user.is_support_agent
     user.is_support_agent = not user.is_support_agent
+    new_status = user.is_support_agent
     db.session.commit()
     
     action = 'granted' if user.is_support_agent else 'revoked'
-    flash(f'Support agent access {action} for {user.full_name}.', 'success')
-    log_action('SUPPORT_AGENT_TOGGLE', 'User', user.id, f'Support agent status: {user.is_support_agent}')
+    flash(f'Support agent access {action} for {user.full_name or user.email}.', 'success')
+    
+    # Enhanced activity logging
+    log_action(
+        'SUPPORT_AGENT_STATUS_CHANGE', 
+        'User', 
+        user.id, 
+        f'Admin {admin.full_name or admin.email} (ID: {admin.id}) {action} support agent access for {user.full_name or user.email} (ID: {user.id}). Previous status: {old_status}, New status: {new_status}'
+    )
     
     return redirect(url_for('manage_support_agents'))
+
+
+@app.route('/admin/support-conversations')
+@login_required
+@role_required('admin')
+def admin_support_conversations():
+    """Admin page to view and manage all support conversations"""
+    # Get all support conversations
+    conversations = Conversation.query.filter_by(
+        conversation_type='user_support'
+    ).order_by(Conversation.last_message_at.desc()).all()
+    
+    # Get conversation data with details
+    conv_data = []
+    for conv in conversations:
+        customer = conv.user1  # Customer is user1
+        support_agent = conv.user2  # Support agent is user2
+        
+        # Get last message
+        last_msg = conv.messages[-1] if conv.messages else None
+        
+        # Count total messages
+        total_messages = len(conv.messages)
+        
+        # Get assigned support agent details
+        assigned_agent = support_agent if support_agent.is_support_agent or support_agent.role == 'admin' else None
+        
+        conv_data.append({
+            'conversation': conv,
+            'customer': customer,
+            'support_agent': assigned_agent,
+            'last_message': last_msg,
+            'total_messages': total_messages,
+            'created_at': conv.created_at,
+            'last_message_at': conv.last_message_at
+        })
+    
+    # Get all support agents for statistics
+    support_agents = User.query.filter_by(is_support_agent=True).all()
+    
+    # Calculate active agents (last activity within 5 minutes)
+    now = datetime.utcnow()
+    active_agents_count = sum(
+        1 for agent in support_agents 
+        if agent.last_activity and (now - agent.last_activity).total_seconds() < 300
+    )
+    
+    log_action('ADMIN_VIEW_SUPPORT_CONVERSATIONS', 'Conversation', None, 
+              f'Admin accessed support conversations overview. Total conversations: {len(conversations)}')
+    
+    return render_template('admin_support_conversations.html',
+        conversations=conv_data,
+        support_agents=support_agents,
+        active_agents_count=active_agents_count,
+        now=now
+    )
 
 
 @app.route('/admin/logs')
