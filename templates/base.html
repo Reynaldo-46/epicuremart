@@ -56,19 +56,20 @@
 
       /* Navigation */
       .navbar {
-        background: rgba(255, 255, 255, 0.95);
+        background: rgba(255, 255, 255, 0.98);
         backdrop-filter: blur(10px);
         border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-        padding: 1rem 0;
+        padding: 0.75rem 0;
         box-shadow: var(--shadow-sm);
         position: sticky;
         top: 0;
-        z-index: 1000;
+        z-index: 1030;
         transition: all 0.3s ease;
       }
 
       .navbar-scrolled {
-        box-shadow: var(--shadow-md);
+        box-shadow: var(--shadow-lg);
+        padding: 0.5rem 0;
       }
 
       .navbar-brand {
@@ -92,16 +93,25 @@
         border-radius: 0.5rem;
         transition: all 0.3s ease;
         position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
       }
 
       .nav-link:hover {
-        background: var(--light);
+        background: rgba(99, 102, 241, 0.1);
         color: var(--primary) !important;
       }
 
       .nav-link.active {
         background: var(--gradient-primary);
         color: white !important;
+      }
+      
+      .nav-link .badge {
+        font-size: 0.65rem;
+        padding: 0.25rem 0.5rem;
+        animation: pulse 2s infinite;
       }
 
       /* Buttons */
@@ -614,7 +624,39 @@
         }
 
         .navbar-brand {
-          font-size: 1.5rem;
+          font-size: 1.25rem;
+        }
+        
+        .navbar {
+          padding: 0.5rem 0;
+        }
+        
+        .nav-link {
+          padding: 0.75rem 1rem !important;
+          margin: 0.25rem 0;
+        }
+        
+        .navbar-nav {
+          margin-top: 1rem;
+        }
+        
+        .navbar-collapse {
+          background: white;
+          padding: 1rem;
+          border-radius: 0.5rem;
+          margin-top: 0.5rem;
+          box-shadow: var(--shadow-md);
+        }
+      }
+      
+      @media (max-width: 576px) {
+        .hero-title {
+          font-size: 1.75rem !important;
+        }
+        
+        .btn-lg {
+          padding: 0.75rem 1.5rem;
+          font-size: 0.9rem;
         }
       }
 
