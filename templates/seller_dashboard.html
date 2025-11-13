@@ -2,7 +2,7 @@
 
 {% block content %}
 <style>
-    /* Premium Seller Dashboard Styles */
+       /* Premium Seller Dashboard Styles */
     .seller-dashboard {
         background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         min-height: 100vh;
@@ -17,6 +17,8 @@
         margin-bottom: 2rem;
         box-shadow: 0 8px 30px rgba(0,0,0,0.08);
         backdrop-filter: blur(10px);
+        position: relative;
+        z-index: 1000 !important;
     }
     
     .profile-section {
@@ -73,6 +75,24 @@
         gap: 0.75rem;
         flex-wrap: wrap;
         align-items: center;
+        position: relative;
+        z-index: 10000 !important;
+    }
+    
+    .filter-controls .dropdown {
+        position: relative;
+        z-index: 10001 !important;
+    }
+    
+    .filter-controls .dropdown-menu {
+        z-index: 100000 !important;
+        position: absolute !important;
+    }
+    
+    /* Bootstrap dropdown menu override */
+    .dropdown-menu.show {
+        z-index: 100000 !important;
+        position: absolute !important;
     }
     
     .date-input {
@@ -109,6 +129,8 @@
         grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         gap: 1.5rem;
         margin-bottom: 2rem;
+        position: relative;
+        z-index: 1;
     }
     
     .kpi-card {
@@ -120,6 +142,7 @@
         position: relative;
         overflow: hidden;
         border: 1px solid rgba(255,255,255,0.8);
+        z-index: 1;
     }
     
     .kpi-card::before {
