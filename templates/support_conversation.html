@@ -3,86 +3,359 @@
 {% block title %}Support Chat - Epicuremart{% endblock %}
 
 {% block content %}
-<div class="container my-4">
-    <div class="row">
-        <div class="col-md-8 mx-auto">
-            <div class="card shadow-sm">
-                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <div>
-                        <h5 class="mb-0">
-                            <i class="fas fa-headset"></i> Support Chat
-                            {% if other_user.is_support_agent %}
-                            with {{ other_user.full_name or other_user.email }}
-                            <span class="badge badge-success">Support Agent</span>
-                            {% else %}
-                            with {{ other_user.full_name or other_user.email }}
-                            <span class="badge badge-info">{{ other_user.role|title }}</span>
-                            {% endif %}
-                        </div>
-                    <div>
-                        {% if other_user.is_support_agent %}
-                            {% if other_user.last_activity and (now() - other_user.last_activity).total_seconds() < 300 %}
-                            <span class="badge badge-success">
-                                <i class="fas fa-circle"></i> Online
-                            </span>
-                            {% else %}
-                            <span class="badge badge-secondary">
-                                <i class="fas fa-circle"></i> Offline
-                            </span>
-                            {% endif %}
-                        {% endif %}
-                        <a href="{% if session.is_support_agent %}{{ url_for('support_dashboard') }}{% else %}{{ url_for('index') }}{% endif %}" class="btn btn-sm btn-light">
-                            <i class="fas fa-arrow-left"></i> Back
-                        </a>
+<style>
+    .chat-container {
+        max-width: 900px;
+        margin: 2rem auto;
+    }
+    
+    .chat-card {
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        border: none;
+    }
+    
+    .chat-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border: none;
+    }
+    
+    .user-info {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    
+    .user-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: white;
+    }
+    
+    .status-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 6px;
+        animation: pulse 2s infinite;
+    }
+    
+    .status-online {
+        background: #10b981;
+    }
+    
+    .status-offline {
+        background: #6b7280;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    .chat-messages {
+        height: 550px;
+        overflow-y: auto;
+        padding: 1.5rem;
+        background: #f8f9fa;
+        scroll-behavior: smooth;
+    }
+    
+    .chat-messages::-webkit-scrollbar {
+        width: 6px;
+    }
+    
+    .chat-messages::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+    
+    .chat-messages::-webkit-scrollbar-thumb {
+        background: #cbd5e0;
+        border-radius: 3px;
+    }
+    
+    .message-wrapper {
+        margin-bottom: 1.5rem;
+        display: flex;
+        animation: slideIn 0.3s ease-out;
+    }
+    
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    .message-wrapper.sent {
+        justify-content: flex-end;
+    }
+    
+    .message-bubble {
+        max-width: 70%;
+        padding: 1rem 1.25rem;
+        border-radius: 18px;
+        position: relative;
+        word-wrap: break-word;
+    }
+    
+    .message-bubble.sent {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-bottom-right-radius: 4px;
+    }
+    
+    .message-bubble.received {
+        background: white;
+        color: #1a202c;
+        border-bottom-left-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    
+    .message-sender {
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        opacity: 0.9;
+    }
+    
+    .message-text {
+        font-size: 0.95rem;
+        line-height: 1.5;
+        margin-bottom: 0.5rem;
+    }
+    
+    .message-time {
+        font-size: 0.7rem;
+        opacity: 0.7;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    
+    .agent-badge {
+        display: inline-block;
+        background: rgba(16, 185, 129, 0.2);
+        color: #10b981;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        margin-left: 6px;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: #6b7280;
+    }
+    
+    .empty-state i {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.3;
+    }
+    
+    .chat-input-area {
+        padding: 1.25rem;
+        background: white;
+        border-top: 1px solid #e5e7eb;
+    }
+    
+    .input-wrapper {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-end;
+    }
+    
+    .message-input {
+        flex: 1;
+        border: 2px solid #e5e7eb;
+        border-radius: 24px;
+        padding: 0.75rem 1.25rem;
+        font-size: 0.95rem;
+        transition: all 0.2s;
+        resize: none;
+        max-height: 120px;
+    }
+    
+    .message-input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    
+    .send-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        flex-shrink: 0;
+    }
+    
+    .send-button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    
+    .send-button:active {
+        transform: scale(0.95);
+    }
+    
+    .back-button {
+        background: rgba(255,255,255,0.2);
+        border: none;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        transition: all 0.2s;
+    }
+    
+    .back-button:hover {
+        background: rgba(255,255,255,0.3);
+        color: white;
+    }
+    
+    .typing-indicator {
+        display: none;
+        padding: 1rem;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .typing-indicator.active {
+        display: flex;
+    }
+    
+    .typing-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #6b7280;
+        animation: bounce 1.4s infinite ease-in-out;
+    }
+    
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    
+    @keyframes bounce {
+        0%, 80%, 100% { transform: scale(0); }
+        40% { transform: scale(1); }
+    }
+</style>
 
+<div class="chat-container">
+    <div class="card chat-card">
+        <div class="chat-header">
+            <div class="d-flex justify-content-between align-items-center w-100">
+                <div class="user-info flex-grow-1">
+                    <div class="user-avatar">
+                        {{ (other_user.full_name or other_user.email)[0].upper() }}
+                    </div>
+                    <div>
+                        <h5 class="mb-1 text-white">
+                            {{ other_user.full_name or other_user.email }}
+                            {% if other_user.is_support_agent %}
+                            <span class="agent-badge">Support Agent</span>
+                            {% endif %}
+                        </h5>
+                        <small class="text-white-50">
+                            {% if other_user.is_support_agent %}
+                                {% if other_user.last_activity and (now() - other_user.last_activity).total_seconds() < 300 %}
+                                <span class="status-indicator status-online"></span>Online
+                                {% else %}
+                                <span class="status-indicator status-offline"></span>Offline
+                                {% endif %}
+                            {% else %}
+                                {{ other_user.role|title }}
+                            {% endif %}
+                        </small>
                     </div>
                 </div>
-                
-                <div class="card-body" style="height: 500px; overflow-y: auto;" id="messageContainer">
-                    {% if messages %}
-                        {% for message in messages %}
-                        <div class="mb-3 {% if message.sender_id == session.user_id %}text-right{% endif %}" id="message-{{ message.id }}">
-                            <div class="d-inline-block" style="max-width: 70%;">
-                                <div class="p-3 rounded {% if message.sender_id == session.user_id %}bg-primary text-white{% else %}bg-light{% endif %}">
-                                    <div class="font-weight-bold small mb-1">
-                                        {% if message.sender_id == session.user_id %}
-                                        You
-                                        {% else %}
-                                        {{ message.sender.full_name or message.sender.email }}
-                                        {% if message.sender.is_support_agent %}
-                                        <span class="badge badge-success">Agent</span>
-                                        {% endif %}
-                                        {% endif %}
-                                    </div>
-                                    <div>{{ message.message_text }}</div>
-                                    <div class="small mt-1 {% if message.sender_id == session.user_id %}text-white-50{% else %}text-muted{% endif %}">
-                                        {{ message.created_at.strftime('%b %d, %I:%M %p') }}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                    <div class="text-center text-muted py-5">
-                        <i class="fas fa-comments fa-3x mb-3"></i>
-                        <p>No messages yet. Start the conversation!</p>
-                    </div>
-                    {% endif %}
-                </div>
-                
-                <div class="card-footer">
-                    <form id="messageForm" method="POST" action="{{ url_for('send_support_message', conversation_id=conversation.id) }}">
-                        <div class="input-group">
-                            <input type="text" name="message_text" id="messageInput" class="form-control" placeholder="Type your message..." required autocomplete="off">
-                            <div class="input-group-append">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-paper-plane"></i> Send
-                                </button>
-                            </div>
-                        </div>
-                    </form>
+                <div class="ml-auto">
+                    <a href="{% if session.is_support_agent %}{{ url_for('support_dashboard') }}{% else %}{{ url_for('index') }}{% endif %}" class="back-button">
+                        <i class="fas fa-arrow-left"></i> Back
+                    </a>
                 </div>
             </div>
+        </div>
+        
+        <div class="chat-messages" id="messageContainer">
+            {% if messages %}
+                {% for message in messages %}
+                <div class="message-wrapper {% if message.sender_id == session.user_id %}sent{% endif %}" id="message-{{ message.id }}">
+                    <div class="message-bubble {% if message.sender_id == session.user_id %}sent{% else %}received{% endif %}">
+                        <div class="message-sender">
+                            {% if message.sender_id == session.user_id %}
+                            You
+                            {% else %}
+                            {{ message.sender.full_name or message.sender.email }}
+                            {% if message.sender.is_support_agent %}
+                            <span class="agent-badge">Agent</span>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                        <div class="message-text">{{ message.message_text }}</div>
+                        <div class="message-time">
+                            <i class="far fa-clock"></i>
+                            {{ message.created_at.strftime('%b %d, %I:%M %p') }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                <div class="typing-indicator" id="typingIndicator">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-comments"></i>
+                <h5>No messages yet</h5>
+                <p>Start the conversation by sending a message below</p>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="chat-input-area">
+            <form id="messageForm" method="POST" action="{{ url_for('send_support_message', conversation_id=conversation.id) }}">
+                <div class="input-wrapper">
+                    <input 
+                        type="text" 
+                        name="message_text" 
+                        id="messageInput" 
+                        class="message-input" 
+                        placeholder="Type your message..." 
+                        required 
+                        autocomplete="off"
+                    >
+                    <button type="submit" class="send-button">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -103,6 +376,12 @@ document.getElementById('messageForm').addEventListener('submit', function(e) {
     var form = this;
     var formData = new FormData(form);
     var messageInput = document.getElementById('messageInput');
+    var messageText = messageInput.value.trim();
+    
+    if (!messageText) return;
+    
+    // Disable input while sending
+    messageInput.disabled = true;
     
     fetch(form.action, {
         method: 'POST',
@@ -112,20 +391,34 @@ document.getElementById('messageForm').addEventListener('submit', function(e) {
     .then(data => {
         if (data.success) {
             messageInput.value = '';
+            messageInput.disabled = false;
+            messageInput.focus();
             // Reload messages
             location.reload();
         } else {
             alert('Failed to send message: ' + (data.error || 'Unknown error'));
+            messageInput.disabled = false;
         }
     })
     .catch(error => {
         console.error('Error:', error);
         alert('Failed to send message. Please try again.');
+        messageInput.disabled = false;
     });
 });
 
+// Auto-expand textarea
+document.getElementById('messageInput').addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
 // Auto-refresh every 5 seconds to check for new messages
+let isChecking = false;
 setInterval(function() {
+    if (isChecking) return;
+    
+    isChecking = true;
     var lastMessageId = 0;
     var messages = document.querySelectorAll('[id^="message-"]');
     if (messages.length > 0) {
@@ -137,10 +430,26 @@ setInterval(function() {
     .then(response => response.json())
     .then(data => {
         if (data.success && data.messages.length > 0) {
-            location.reload();
+            // Show typing indicator briefly before reload
+            document.getElementById('typingIndicator').classList.add('active');
+            setTimeout(() => {
+                location.reload();
+            }, 500);
         }
+        isChecking = false;
     })
-    .catch(error => console.error('Error checking for new messages:', error));
+    .catch(error => {
+        console.error('Error checking for new messages:', error);
+        isChecking = false;
+    });
 }, 5000);
+
+// Enter to send, Shift+Enter for new line
+document.getElementById('messageInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById('messageForm').dispatchEvent(new Event('submit'));
+    }
+});
 </script>
 {% endblock %}

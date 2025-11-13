@@ -723,13 +723,23 @@
           <ul class="navbar-nav">
             {% if session.user_id %} {% if session.role == 'customer' %}
             <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('messages_inbox') }}">
+              <a class="nav-link position-relative" href="{{ url_for('messages_inbox') }}">
                 <i class="fas fa-comments"></i> Messages
+                {% if unread_messages > 0 %}
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                  {{ unread_messages }}
+                </span>
+                {% endif %}
               </a>
             </li>
             <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('view_cart') }}">
+              <a class="nav-link position-relative" href="{{ url_for('view_cart') }}">
                 <i class="fas fa-shopping-cart"></i> Cart
+                {% if cart_count > 0 %}
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-primary">
+                  {{ cart_count }}
+                </span>
+                {% endif %}
               </a>
             </li>
             <li class="nav-item">
@@ -739,8 +749,24 @@
             </li>
             {% elif session.role == 'seller' %}
             <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('messages_inbox') }}">
+              <a class="nav-link position-relative" href="{{ url_for('messages_inbox') }}">
                 <i class="fas fa-comments"></i> Messages
+                {% if unread_messages > 0 %}
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                  {{ unread_messages }}
+                </span>
+                {% endif %}
+              </a>
+            </li>
+            {% elif session.role in ['rider', 'courier'] %}
+            <li class="nav-item">
+              <a class="nav-link position-relative" href="{{ url_for('messages_inbox') }}">
+                <i class="fas fa-comments"></i> Messages
+                {% if unread_messages > 0 %}
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                  {{ unread_messages }}
+                </span>
+                {% endif %}
               </a>
             </li>
             {% endif %}
@@ -748,8 +774,13 @@
             <!-- Support Chat Button for all logged-in users -->
             {% if session.is_support_agent or session.role == 'admin' %}
             <li class="nav-item">
-              <a class="nav-link text-success" href="{{ url_for('support_dashboard') }}">
+              <a class="nav-link text-success position-relative" href="{{ url_for('support_dashboard') }}">
                 <i class="fas fa-headset"></i> Support Dashboard
+                {% if unread_messages > 0 %}
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                  {{ unread_messages }}
+                </span>
+                {% endif %}
               </a>
             </li>
             {% else %}

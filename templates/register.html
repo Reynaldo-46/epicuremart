@@ -27,11 +27,50 @@
                             <small class="form-text text-muted" id="roleInfo"></small>
                         </div>
 
-                        <!-- ID Upload Section (shown for Seller and Rider/Courier) -->
+                        <!-- ID Upload Section (shown for all users, optional for Buyers) -->
                         <div class="mb-4 d-none" id="idUploadSection">
-                            <label class="form-label fw-bold">Valid ID Document *</label>
-                            <input type="file" name="id_document" class="form-control" id="idDocumentInput" accept="image/*,.pdf">
-                            <small class="form-text text-muted">Upload a valid government-issued ID (Required for Sellers and Riders/Couriers)</small>
+                            <label class="form-label fw-bold">Valid ID Document <span id="idRequiredLabel">*</span></label>
+                            <input type="file" name="id_document" class="form-control" id="idDocumentInput" accept="image/*">
+                            <small class="form-text text-muted" id="idUploadHelp">Upload a valid government-issued ID</small>
+                        </div>
+                        
+                        <!-- Business Permit Section (shown for Seller only) -->
+                        <div class="mb-4 d-none" id="businessPermitSection">
+                            <label class="form-label fw-bold">Business Permit *</label>
+                            <input type="file" name="business_permit" class="form-control" id="businessPermitInput" accept="image/*">
+                            <small class="form-text text-muted">Upload your business permit (Required for Sellers)</small>
+                        </div>
+                        
+                        <!-- Driver's License and OR/CR Section (shown for Rider/Courier only) -->
+                        <div class="mb-4 d-none" id="driversLicenseSection">
+                            <label class="form-label fw-bold">Driver's License *</label>
+                            <input type="file" name="drivers_license" class="form-control" id="driversLicenseInput" accept="image/*">
+                            <small class="form-text text-muted">Upload your driver's license (Required for Riders/Couriers)</small>
+                        </div>
+                        
+                        <div class="mb-4 d-none" id="orCrSection">
+                            <label class="form-label fw-bold">OR/CR (Official Receipt / Certificate of Registration) *</label>
+                            <input type="file" name="or_cr" class="form-control" id="orCrInput" accept="image/*">
+                            <small class="form-text text-muted">Upload your vehicle's OR/CR (Required for Riders/Couriers)</small>
+                        </div>
+                        
+                        <!-- Vehicle Details Section (shown for Rider/Courier only) -->
+                        <div class="row d-none" id="vehicleDetailsSection">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Plate Number *</label>
+                                <input type="text" name="plate_number" class="form-control" id="plateNumberInput"
+                                       placeholder="ABC 1234">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Vehicle Type *</label>
+                                <select name="vehicle_type" class="form-select" id="vehicleTypeInput">
+                                    <option value="">-- Select Vehicle Type --</option>
+                                    <option value="motorcycle">Motorcycle</option>
+                                    <option value="car">Car</option>
+                                    <option value="van">Van</option>
+                                    <option value="truck">Truck</option>
+                                </select>
+                            </div>
                         </div>
                         
                         <!-- Name Fields -->
@@ -61,9 +100,10 @@
                                        placeholder="you@example.com" required>
                             </div>
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Phone Number *</label>
-                                <input type="tel" name="phone" class="form-control" 
-                                       placeholder="+63 912 345 6789" required>
+                                <label class="form-label" id="phoneLabel">Phone Number *</label>
+                                <input type="tel" name="phone" class="form-control" id="phoneInput"
+                                       placeholder="+63 912 345 6789">
+                                <small class="form-text text-muted" id="phoneHelp">Required for buyers, riders, and couriers</small>
                             </div>
                         </div>
                         
@@ -93,10 +133,10 @@
                                 </select>
                             </div>
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">City *</label>
-                                <select name="city" class="form-select" id="citySelect" required disabled>
-                                    <option value="">-- Select City --</option>
-                                </select>
+                                <label class="form-label">Postal Code *</label>
+                                <input type="text" name="postal_code" class="form-control" id="postalCodeInput"
+                                       placeholder="4 digits" required pattern="\d{4}" maxlength="4">
+                                <small class="form-text text-muted">Enter exactly 4 digits</small>
                             </div>
                         </div>
 
@@ -105,6 +145,25 @@
                             <select name="barangay" class="form-select" id="barangaySelect" required disabled>
                                 <option value="">-- Select Barangay --</option>
                             </select>
+                        </div>
+                        
+                        <!-- Optional Address Details -->
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Street (Optional)</label>
+                                <input type="text" name="street" class="form-control" 
+                                       placeholder="e.g., Main Street">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Block (Optional)</label>
+                                <input type="text" name="block" class="form-control" 
+                                       placeholder="e.g., 5">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Lot (Optional)</label>
+                                <input type="text" name="lot" class="form-control" 
+                                       placeholder="e.g., 12">
+                            </div>
                         </div>
                         
                         <!-- Password Fields -->
@@ -176,14 +235,11 @@ function populateProvinces() {
 document.getElementById('provinceSelect').addEventListener('change', function() {
     const province = this.value;
     const municipalitySelect = document.getElementById('municipalitySelect');
-    const citySelect = document.getElementById('citySelect');
     const barangaySelect = document.getElementById('barangaySelect');
     
     // Reset dependent dropdowns
     municipalitySelect.innerHTML = '<option value="">-- Select Municipality --</option>';
-    citySelect.innerHTML = '<option value="">-- Select City --</option>';
     barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
-    citySelect.disabled = true;
     barangaySelect.disabled = true;
     
     if (province && addressData.provinces[province]) {
@@ -203,52 +259,26 @@ document.getElementById('provinceSelect').addEventListener('change', function() 
 document.getElementById('municipalitySelect').addEventListener('change', function() {
     const province = document.getElementById('provinceSelect').value;
     const municipality = this.value;
-    const citySelect = document.getElementById('citySelect');
-    const barangaySelect = document.getElementById('barangaySelect');
-    
-    // Reset dependent dropdowns
-    citySelect.innerHTML = '<option value="">-- Select City --</option>';
-    barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
-    barangaySelect.disabled = true;
-    
-    if (municipality && addressData.provinces[province].municipalities[municipality]) {
-        const municipalityData = addressData.provinces[province].municipalities[municipality];
-        
-        // Populate cities
-        if (municipalityData.cities) {
-            municipalityData.cities.forEach(city => {
-                const option = document.createElement('option');
-                option.value = city;
-                option.textContent = city;
-                citySelect.appendChild(option);
-            });
-        }
-        citySelect.disabled = false;
-    } else {
-        citySelect.disabled = true;
-    }
-});
-
-document.getElementById('citySelect').addEventListener('change', function() {
-    const province = document.getElementById('provinceSelect').value;
-    const municipality = document.getElementById('municipalitySelect').value;
     const barangaySelect = document.getElementById('barangaySelect');
     
     // Reset barangay dropdown
     barangaySelect.innerHTML = '<option value="">-- Select Barangay --</option>';
     
     if (municipality && addressData.provinces[province].municipalities[municipality]) {
-        const barangays = addressData.provinces[province].municipalities[municipality].barangays;
+        const municipalityData = addressData.provinces[province].municipalities[municipality];
         
-        if (barangays) {
-            barangays.forEach(barangay => {
+        // Populate barangays directly from municipality
+        if (municipalityData.barangays) {
+            municipalityData.barangays.forEach(barangay => {
                 const option = document.createElement('option');
                 option.value = barangay;
                 option.textContent = barangay;
                 barangaySelect.appendChild(option);
             });
+            barangaySelect.disabled = false;
         }
-        barangaySelect.disabled = false;
+    } else {
+        barangaySelect.disabled = true;
     }
 });
 
@@ -257,23 +287,77 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     const roleInfo = document.getElementById('roleInfo');
     const idUploadSection = document.getElementById('idUploadSection');
     const idDocumentInput = document.getElementById('idDocumentInput');
+    const idRequiredLabel = document.getElementById('idRequiredLabel');
+    const idUploadHelp = document.getElementById('idUploadHelp');
+    const businessPermitSection = document.getElementById('businessPermitSection');
+    const businessPermitInput = document.getElementById('businessPermitInput');
+    const driversLicenseSection = document.getElementById('driversLicenseSection');
+    const driversLicenseInput = document.getElementById('driversLicenseInput');
+    const orCrSection = document.getElementById('orCrSection');
+    const orCrInput = document.getElementById('orCrInput');
+    const vehicleDetailsSection = document.getElementById('vehicleDetailsSection');
+    const plateNumberInput = document.getElementById('plateNumberInput');
+    const vehicleTypeInput = document.getElementById('vehicleTypeInput');
+    const phoneInput = document.getElementById('phoneInput');
+    const phoneLabel = document.getElementById('phoneLabel');
     const value = this.value;
     
     const messages = {
-        'customer': 'Start shopping immediately after email verification',
-        'seller': 'Requires admin approval and ID upload. You\'ll receive an email when approved.',
-        'rider': 'Requires admin approval and ID upload. Join our delivery network today.'
+        'customer': 'Start shopping immediately after email verification. ID upload is optional but recommended for verification.',
+        'seller': 'Requires admin approval, ID, and business permit upload. You\'ll receive an email when approved.',
+        'rider': 'Requires admin approval, ID, driver\'s license, and OR/CR upload. Join our delivery network today.'
     };
     
     roleInfo.textContent = messages[value] || '';
     
-    // Show/hide ID upload section
-    if (value === 'seller' || value === 'rider') {
+    // Reset all sections to hidden
+    idUploadSection.classList.add('d-none');
+    idDocumentInput.required = false;
+    businessPermitSection.classList.add('d-none');
+    businessPermitInput.required = false;
+    driversLicenseSection.classList.add('d-none');
+    driversLicenseInput.required = false;
+    orCrSection.classList.add('d-none');
+    orCrInput.required = false;
+    vehicleDetailsSection.classList.add('d-none');
+    plateNumberInput.required = false;
+    vehicleTypeInput.required = false;
+    
+    // Update phone requirement based on role
+    if (value === 'customer' || value === 'rider' || value === 'courier') {
+        phoneInput.required = true;
+        phoneLabel.textContent = 'Phone Number *';
+    } else {
+        phoneInput.required = false;
+        phoneLabel.textContent = 'Phone Number (Optional)';
+    }
+    
+    // Show/hide sections based on role
+    if (value === 'customer') {
+        // Show ID upload for customer but make it optional
+        idUploadSection.classList.remove('d-none');
+        idDocumentInput.required = false;
+        idRequiredLabel.textContent = ' (Optional)';
+        idUploadHelp.textContent = 'Upload a valid government-issued ID for verification (Optional but recommended)';
+    } else if (value === 'seller') {
         idUploadSection.classList.remove('d-none');
         idDocumentInput.required = true;
-    } else {
-        idUploadSection.classList.add('d-none');
-        idDocumentInput.required = false;
+        idRequiredLabel.textContent = ' *';
+        idUploadHelp.textContent = 'Upload a valid government-issued ID (Required)';
+        businessPermitSection.classList.remove('d-none');
+        businessPermitInput.required = true;
+    } else if (value === 'rider') {
+        idUploadSection.classList.remove('d-none');
+        idDocumentInput.required = true;
+        idRequiredLabel.textContent = ' *';
+        idUploadHelp.textContent = 'Upload a valid government-issued ID (Required)';
+        driversLicenseSection.classList.remove('d-none');
+        driversLicenseInput.required = true;
+        orCrSection.classList.remove('d-none');
+        orCrInput.required = true;
+        vehicleDetailsSection.classList.remove('d-none');
+        plateNumberInput.required = true;
+        vehicleTypeInput.required = true;
     }
 });
 

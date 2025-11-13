@@ -5,6 +5,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from functools import wraps
+from decimal import Decimal
 import jwt
 import qrcode
 import io
@@ -48,13 +49,22 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.Enum('admin', 'seller', 'customer', 'courier', 'rider'), nullable=False)
     is_verified = db.Column(db.Boolean, default=False)
+    verification_code = db.Column(db.String(10))  # Email verification code
+    verification_code_expires = db.Column(db.DateTime)  # Verification code expiry
     is_approved = db.Column(db.Boolean, default=True)  # Admin approval for sellers/couriers/riders
+    is_suspended = db.Column(db.Boolean, default=False)  # Account suspension
+    suspension_reason = db.Column(db.Text)  # Reason for suspension
     full_name = db.Column(db.String(100))
     first_name = db.Column(db.String(50))
     middle_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50))
     phone = db.Column(db.String(20))
     id_document = db.Column(db.String(255))  # File path for uploaded ID
+    business_permit = db.Column(db.String(255))  # Business permit for sellers
+    drivers_license = db.Column(db.String(255))  # Driver's license for riders/couriers
+    or_cr = db.Column(db.String(255))  # OR/CR for riders/couriers
+    plate_number = db.Column(db.String(50))  # Plate number for riders/couriers
+    vehicle_type = db.Column(db.String(50))  # Vehicle type for riders/couriers
     profile_picture = db.Column(db.String(255))  # Profile picture/business icon
     is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
@@ -64,6 +74,7 @@ class User(db.Model):
     shop = db.relationship('Shop', backref='owner', uselist=False, cascade='all, delete-orphan')
     addresses = db.relationship('Address', backref='user', cascade='all, delete-orphan')
     orders = db.relationship('Order', backref='customer', foreign_keys='Order.customer_id')
+    cart_items = db.relationship('CartItem', backref='user', cascade='all, delete-orphan')
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -112,6 +123,18 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class CartItem(db.Model):
+    """Transaction-based cart - each add creates a separate entry"""
+    __tablename__ = 'cart_items'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    product = db.relationship('Product')
+
 
 class Address(db.Model):
     __tablename__ = 'addresses'
@@ -124,6 +147,9 @@ class Address(db.Model):
     municipality = db.Column(db.String(100))
     city = db.Column(db.String(100))
     barangay = db.Column(db.String(100))
+    street = db.Column(db.String(255))  # Street name
+    block = db.Column(db.String(50))  # Block number
+    lot = db.Column(db.String(50))  # Lot number
     postal_code = db.Column(db.String(20))
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -150,6 +176,10 @@ class Order(db.Model):
     commission_rate = db.Column(Numeric(5, 2), default=5.00)  # 5% commission
     commission_amount = db.Column(Numeric(10, 2), default=0.00)
     seller_amount = db.Column(Numeric(10, 2), default=0.00)
+    courier_earnings = db.Column(Numeric(10, 2), default=0.00)  # Courier's share of delivery fee
+    rider_earnings = db.Column(Numeric(10, 2), default=0.00)  # Rider's share of delivery fee
+    shipping_fee_split_courier = db.Column(Numeric(5, 2), default=60.00)  # 60% to courier
+    shipping_fee_split_rider = db.Column(Numeric(5, 2), default=40.00)  # 40% to rider
 
     # QR Tokens
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
@@ -224,7 +254,7 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin'), nullable=False)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -355,6 +385,29 @@ def generate_order_number():
     return f"EM{timestamp}{random_part}"
 
 
+@app.context_processor
+def inject_cart_and_messages():
+    """Make cart count and unread messages available to all templates"""
+    cart_count = 0
+    unread_messages = 0
+    
+    if 'user_id' in session:
+        user_id = session['user_id']
+        # Cart count = number of cart item transactions
+        cart_count = CartItem.query.filter_by(user_id=user_id).count()
+        
+        # Unread messages count - messages where user is recipient and not read
+        unread_messages = Message.query.join(Conversation).filter(
+            db.or_(
+                db.and_(Conversation.user1_id == user_id, Message.sender_id != user_id),
+                db.and_(Conversation.user2_id == user_id, Message.sender_id != user_id)
+            ),
+            Message.is_read == False
+        ).count()
+    
+    return dict(cart_count=cart_count, unread_messages=unread_messages)
+
+
 # ==================== ROUTES ====================
 
 @app.route('/')
@@ -363,6 +416,11 @@ def index():
     products = Product.query.filter_by(is_active=True).limit(12).all()
     # conversation = Conversation.query.all()
     return render_template('index.html', categories=categories, products=products)
+
+
+@app.route('/about')
+def about():
+    return render_template('about.html')
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -375,14 +433,26 @@ def register():
         first_name = request.form.get('first_name')
         middle_name = request.form.get('middle_name', '')
         last_name = request.form.get('last_name')
-        phone = request.form.get('phone')
+        phone = request.form.get('phone', '')
         
         # Address fields
         region = request.form.get('region')
         province = request.form.get('province')
         municipality = request.form.get('municipality')
-        city = request.form.get('city')
         barangay = request.form.get('barangay')
+        postal_code = request.form.get('postal_code', '')
+        street = request.form.get('street', '')
+        block = request.form.get('block', '')
+        lot = request.form.get('lot', '')
+        
+        # Validate postal code (must be exactly 4 digits)
+        if postal_code and not (postal_code.isdigit() and len(postal_code) == 4):
+            flash('Postal code must be exactly 4 digits.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Rider/Courier specific fields
+        plate_number = request.form.get('plate_number', '')
+        vehicle_type = request.form.get('vehicle_type', '')
         
         # Validate password match
         if password != confirm_password:
@@ -391,6 +461,11 @@ def register():
         
         if User.query.filter_by(email=email).first():
             flash('Email already registered.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Phone validation - required for riders and customers
+        if role in ['customer', 'rider', 'courier'] and not phone:
+            flash('Contact number is required for this role.', 'danger')
             return redirect(url_for('register'))
         
         # Sellers, couriers, riders need admin approval
@@ -407,25 +482,83 @@ def register():
             middle_name=middle_name,
             last_name=last_name,
             phone=phone,
+            plate_number=plate_number,
+            vehicle_type=vehicle_type,
             is_approved=is_approved
         )
         user.set_password(password)
         
-        # Handle ID document upload for sellers, couriers, riders
-        if role in ['seller', 'courier', 'rider']:
+        # Handle ID document upload for all roles (including buyers/customers)
+        if role in ['customer', 'seller', 'courier', 'rider']:
             if 'id_document' in request.files:
                 file = request.files['id_document']
-                if file and allowed_file(file.filename):
+                if file and file.filename and allowed_file(file.filename):
                     filename = secure_filename(file.filename)
                     filename = f"id_{role}_{email.split('@')[0]}_{filename}"
                     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                     file.save(filepath)
                     user.id_document = filename
-                else:
+                elif role in ['seller', 'courier', 'rider']:
                     flash('Valid ID document is required for this role.', 'danger')
                     return redirect(url_for('register'))
-            else:
+            elif role in ['seller', 'courier', 'rider']:
                 flash('ID document upload is required for sellers, couriers, and riders.', 'danger')
+                return redirect(url_for('register'))
+        
+        # Handle business permit for sellers
+        if role == 'seller':
+            if 'business_permit' in request.files:
+                file = request.files['business_permit']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"business_permit_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.business_permit = filename
+                else:
+                    flash('Valid business permit is required for sellers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('Business permit upload is required for sellers.', 'danger')
+                return redirect(url_for('register'))
+        
+        # Handle driver's license and OR/CR for riders and couriers
+        if role in ['rider', 'courier']:
+            # Driver's License
+            if 'drivers_license' in request.files:
+                file = request.files['drivers_license']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"drivers_license_{role}_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.drivers_license = filename
+                else:
+                    flash('Valid driver\'s license is required for riders and couriers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('Driver\'s license upload is required for riders and couriers.', 'danger')
+                return redirect(url_for('register'))
+            
+            # OR/CR
+            if 'or_cr' in request.files:
+                file = request.files['or_cr']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"or_cr_{role}_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.or_cr = filename
+                else:
+                    flash('Valid OR/CR is required for riders and couriers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('OR/CR upload is required for riders and couriers.', 'danger')
+                return redirect(url_for('register'))
+            
+            # Validate plate number and vehicle type
+            if not plate_number or not vehicle_type:
+                flash('Plate number and vehicle type are required for riders and couriers.', 'danger')
                 return redirect(url_for('register'))
         
         db.session.add(user)
@@ -433,7 +566,16 @@ def register():
         
         # Create address entry if provided
         if region and province and barangay:
-            full_address = f"{barangay}, {city or municipality}, {province}, {region}"
+            full_address_parts = []
+            if lot:
+                full_address_parts.append(f"Lot {lot}")
+            if block:
+                full_address_parts.append(f"Block {block}")
+            if street:
+                full_address_parts.append(street)
+            full_address_parts.extend([barangay, municipality, province, region])
+            full_address = ", ".join(full_address_parts)
+            
             address = Address(
                 user_id=user.id,
                 label='Home',
@@ -441,32 +583,40 @@ def register():
                 region=region,
                 province=province,
                 municipality=municipality,
-                city=city,
                 barangay=barangay,
+                postal_code=postal_code,
+                street=street,
+                block=block,
+                lot=lot,
                 is_default=True
             )
             db.session.add(address)
             db.session.commit()
         
-        # Send verification email
-        verification_token = generate_qr_token(user.id, 'email_verify', expiry_hours=48)
-        verify_url = url_for('verify_email', token=verification_token, _external=True)
+        # Generate 6-digit verification code
+        verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+        user.verification_code = verification_code
+        user.verification_code_expires = datetime.utcnow() + timedelta(hours=48)
+        db.session.commit()
+        
+        # Send verification email with code
         send_email(
             user.email,
             'Verify your Epicuremart account',
-            f'Click here to verify: {verify_url}'
+            f'Your verification code is: {verification_code}\n\nThis code will expire in 48 hours.\nPlease enter this code on the verification page to activate your account.'
         )
         
         log_action('USER_REGISTERED', 'User', user.id, f'New {role} registered')
         
-        flash('Registration successful! Please check your email to verify your account.', 'success')
-        return redirect(url_for('login'))
+        flash('Registration successful! Please check your email for your verification code.', 'success')
+        return redirect(url_for('verify_email_code', user_id=user.id))
     
     return render_template('register.html')
 
 
 @app.route('/verify-email/<token>')
 def verify_email(token):
+    """Legacy email verification via token link (kept for backwards compatibility)"""
     payload = verify_qr_token(token)
     if not payload or payload.get('type') != 'email_verify':
         flash('Invalid or expired verification link.', 'danger')
@@ -482,6 +632,70 @@ def verify_email(token):
     return redirect(url_for('login'))
 
 
+@app.route('/verify-code/<int:user_id>', methods=['GET', 'POST'])
+def verify_email_code(user_id):
+    """Email verification using 6-digit code"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.is_verified:
+        flash('Your account is already verified.', 'info')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        code = request.form.get('verification_code', '').strip()
+        
+        if not code:
+            flash('Please enter the verification code.', 'warning')
+            return render_template('verify_code.html', user=user)
+        
+        # Check if code matches and is not expired
+        if user.verification_code != code:
+            flash('Invalid verification code. Please try again.', 'danger')
+            return render_template('verify_code.html', user=user)
+        
+        if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+            flash('Verification code has expired. Please request a new one.', 'danger')
+            return render_template('verify_code.html', user=user, show_resend=True)
+        
+        # Verify the user
+        user.is_verified = True
+        user.verification_code = None
+        user.verification_code_expires = None
+        db.session.commit()
+        
+        log_action('EMAIL_VERIFIED', 'User', user.id, 'Verified via code')
+        flash('Email verified successfully! You can now log in.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('verify_code.html', user=user)
+
+
+@app.route('/resend-verification/<int:user_id>', methods=['POST'])
+def resend_verification_code(user_id):
+    """Resend verification code"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.is_verified:
+        flash('Your account is already verified.', 'info')
+        return redirect(url_for('login'))
+    
+    # Generate new verification code
+    verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    user.verification_code = verification_code
+    user.verification_code_expires = datetime.utcnow() + timedelta(hours=48)
+    db.session.commit()
+    
+    # Send verification email with code
+    send_email(
+        user.email,
+        'Your New Verification Code',
+        f'Your new verification code is: {verification_code}\n\nThis code will expire in 48 hours.'
+    )
+    
+    flash('A new verification code has been sent to your email.', 'success')
+    return redirect(url_for('verify_email_code', user_id=user.id))
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -493,6 +707,12 @@ def login():
         if user and user.check_password(password):
             if not user.is_verified:
                 flash('Please verify your email before logging in.', 'warning')
+                return redirect(url_for('login'))
+            
+            # Check if account is suspended
+            if user.is_suspended:
+                reason = user.suspension_reason or 'No reason provided'
+                flash(f'Your account has been suspended. Reason: {reason}', 'danger')
                 return redirect(url_for('login'))
             
             session['user_id'] = user.id
@@ -563,40 +783,86 @@ def browse():
 @app.route('/cart')
 @login_required
 def view_cart():
-    cart = session.get('cart', {})
+    """View cart with transaction-based cart items"""
+    user_id = session['user_id']
+    
+    # Get all cart items for this user (each entry is a separate transaction)
+    cart_items_db = CartItem.query.filter_by(user_id=user_id).order_by(CartItem.created_at.desc()).all()
+    
     cart_items = []
     total = 0
+    has_stock_error = False
     
-    for product_id, quantity in cart.items():
-        product = Product.query.get(int(product_id))
+    for cart_item in cart_items_db:
+        product = cart_item.product
         if product:
-            subtotal = float(product.price) * quantity
+            subtotal = float(product.price) * cart_item.quantity
+            
+            # Check if quantity exceeds stock
+            exceeds_stock = cart_item.quantity > product.stock
+            if exceeds_stock:
+                has_stock_error = True
+            
             cart_items.append({
+                'cart_item_id': cart_item.id,
                 'product': product,
-                'quantity': quantity,
-                'subtotal': subtotal
+                'quantity': cart_item.quantity,
+                'subtotal': subtotal,
+                'exceeds_stock': exceeds_stock,
+                'created_at': cart_item.created_at
             })
             total += subtotal
     
-    return render_template('cart.html', cart_items=cart_items, total=total)
+    return render_template('cart.html', cart_items=cart_items, total=total, has_stock_error=has_stock_error)
 
 
 @app.route('/cart/add/<int:product_id>', methods=['POST'])
 @login_required
 def add_to_cart(product_id):
+    """Add product to cart with stock validation"""
     product = Product.query.get_or_404(product_id)
     quantity = int(request.form.get('quantity', 1))
+    user_id = session['user_id']
     
-    cart = session.get('cart', {})
+    # Validate quantity
+    if quantity < 1:
+        flash('Quantity must be at least 1.', 'danger')
+        return redirect(request.referrer or url_for('browse'))
     
-    if str(product_id) in cart:
-        cart[str(product_id)] += quantity
-    else:
-        cart[str(product_id)] = quantity
+    # Check if product is active and in stock
+    if not product.is_active:
+        flash('This product is no longer available.', 'danger')
+        return redirect(url_for('browse'))
     
-    session['cart'] = cart
-    flash(f'{product.name} added to cart!', 'success')
-    return redirect(url_for('browse'))
+    if product.stock == 0:
+        flash('This product is out of stock.', 'danger')
+        return redirect(request.referrer or url_for('browse'))
+    
+    # Validate: requested quantity should not exceed stock
+    if quantity > product.stock:
+        flash(f'Only {product.stock} units available. Please adjust quantity.', 'danger')
+        return redirect(request.referrer or url_for('browse'))
+    
+    # Check total quantity in cart (all cart items for this product)
+    existing_cart_items = CartItem.query.filter_by(user_id=user_id, product_id=product_id).all()
+    total_in_cart = sum(item.quantity for item in existing_cart_items)
+    
+    # Check if adding this quantity would exceed stock
+    if total_in_cart + quantity > product.stock:
+        flash(f'Cannot add {quantity} more. You already have {total_in_cart} in cart. Only {product.stock} available.', 'warning')
+        return redirect(request.referrer or url_for('browse'))
+    
+    # Create new cart item (transaction-based - each add creates separate entry)
+    cart_item = CartItem(
+        user_id=user_id,
+        product_id=product_id,
+        quantity=quantity
+    )
+    db.session.add(cart_item)
+    db.session.commit()
+    
+    flash(f'{product.name} (x{quantity}) added to cart!', 'success')
+    return redirect(request.referrer or url_for('browse'))
 
 
 @app.route('/buy-now/<int:product_id>', methods=['POST'])
@@ -622,22 +888,27 @@ def buy_now(product_id):
     return redirect(url_for('checkout'))
 
 
-@app.route('/cart/remove/<int:product_id>')
+@app.route('/cart/remove/<int:cart_item_id>')
 @login_required
-def remove_from_cart(product_id):
-    cart = session.get('cart', {})
-    if str(product_id) in cart:
-        del cart[str(product_id)]
-        session['cart'] = cart
-        flash('Item removed from cart.', 'info')
+def remove_from_cart(cart_item_id):
+    """Remove a specific cart item transaction"""
+    user_id = session['user_id']
+    cart_item = CartItem.query.filter_by(id=cart_item_id, user_id=user_id).first_or_404()
+    
+    db.session.delete(cart_item)
+    db.session.commit()
+    
+    flash('Item removed from cart.', 'info')
     return redirect(url_for('view_cart'))
 
 
-@app.route('/cart/update/<int:product_id>', methods=['POST'])
+@app.route('/cart/update/<int:cart_item_id>', methods=['POST'])
 @login_required
-def update_cart_quantity(product_id):
-    """Update quantity of a product in the cart"""
-    product = Product.query.get_or_404(product_id)
+def update_cart_quantity(cart_item_id):
+    """Update quantity of a specific cart item with stock validation"""
+    user_id = session['user_id']
+    cart_item = CartItem.query.filter_by(id=cart_item_id, user_id=user_id).first_or_404()
+    product = cart_item.product
     new_quantity = int(request.form.get('quantity', 1))
     
     # Validate quantity
@@ -645,13 +916,14 @@ def update_cart_quantity(product_id):
         flash('Quantity must be at least 1.', 'warning')
         return redirect(url_for('view_cart'))
     
+    # Validate against stock
     if new_quantity > product.stock:
         flash(f'Only {product.stock} units available for {product.name}.', 'warning')
         return redirect(url_for('view_cart'))
     
-    cart = session.get('cart', {})
-    cart[str(product_id)] = new_quantity
-    session['cart'] = cart
+    # Update the cart item
+    cart_item.quantity = new_quantity
+    db.session.commit()
     
     flash(f'Updated quantity for {product.name}.', 'success')
     return redirect(url_for('view_cart'))
@@ -851,21 +1123,66 @@ def delete_profile_picture():
 @login_required
 @role_required('customer')
 def checkout():
-    # Check for buy_now_cart first, then regular cart
-    buy_now_cart = session.get('buy_now_cart', {})
-    regular_cart = session.get('cart', {})
+    user_id = session['user_id']
     
-    # Use buy_now_cart if it exists, otherwise use regular cart
-    cart = buy_now_cart if buy_now_cart else regular_cart
-    is_buy_now = bool(buy_now_cart)
+    # Check if this is a Buy Now transaction
+    buy_now_cart = session.get('buy_now_cart', None)
     
-    if not cart:
-        flash('Your cart is empty.', 'warning')
+    if buy_now_cart:
+        # Buy Now: Create temporary cart items list
+        cart_items_db = []
+        for product_id_str, quantity in buy_now_cart.items():
+            product = Product.query.get(int(product_id_str))
+            if product:
+                # Create a temporary cart item object (not saved to database)
+                class TempCartItem:
+                    def __init__(self, product, quantity):
+                        self.product = product
+                        self.quantity = quantity
+                        self.id = f"buy_now_{product.id}"
+                
+                cart_items_db.append(TempCartItem(product, quantity))
+    else:
+        # Regular cart checkout: Handle selective checkout from cart (POST with selected_items)
+        selected_item_ids = request.form.get('selected_items', '').strip()
+        
+        # If coming from cart with selected items
+        if request.method == 'POST' and selected_item_ids:
+            # Store selected items in session for GET request
+            session['selected_cart_items'] = selected_item_ids
+            return redirect(url_for('checkout'))
+        
+        # Get selected items from session or all cart items
+        if 'selected_cart_items' in session and session['selected_cart_items']:
+            selected_ids = [int(id) for id in session['selected_cart_items'].split(',') if id]
+            cart_items_db = CartItem.query.filter(
+                CartItem.user_id == user_id,
+                CartItem.id.in_(selected_ids)
+            ).all()
+        else:
+            # Default to all cart items (for backward compatibility)
+            cart_items_db = CartItem.query.filter_by(user_id=user_id).all()
+    
+    if not cart_items_db:
+        flash('Your cart is empty or no items selected.', 'warning')
         return redirect(url_for('browse'))
     
-    addresses = Address.query.filter_by(user_id=session['user_id']).all()
+    # Check if any selected item exceeds stock before allowing checkout
+    has_stock_error = False
+    for cart_item in cart_items_db:
+        if cart_item.quantity > cart_item.product.stock:
+            has_stock_error = True
+            flash(f'{cart_item.product.name} exceeds available stock.', 'danger')
     
-    if request.method == 'POST':
+    if has_stock_error:
+        # Clear selection and redirect
+        session.pop('selected_cart_items', None)
+        session.pop('buy_now_cart', None)
+        return redirect(url_for('view_cart'))
+    
+    addresses = Address.query.filter_by(user_id=user_id).all()
+    
+    if request.method == 'POST' and request.form.get('address_id'):
         address_id = request.form.get('address_id')
         
         if not address_id:
@@ -874,32 +1191,38 @@ def checkout():
         
         # Get delivery address to calculate delivery fee
         delivery_address = Address.query.get(address_id)
-        if not delivery_address or delivery_address.user_id != session['user_id']:
+        if not delivery_address or delivery_address.user_id != user_id:
             flash('Invalid delivery address.', 'danger')
             return redirect(url_for('checkout'))
         
         # Validate stock availability BEFORE creating orders
-        for product_id, quantity in cart.items():
-            product = Product.query.get(int(product_id))
+        for cart_item in cart_items_db:
+            product = cart_item.product
             if not product:
                 flash(f'Product not found.', 'danger')
+                session.pop('selected_cart_items', None)
+                session.pop('buy_now_cart', None)
                 return redirect(url_for('view_cart'))
             
-            if product.stock < quantity:
+            if product.stock < cart_item.quantity:
                 flash(f'Insufficient stock for {product.name}. Only {product.stock} available.', 'danger')
+                session.pop('selected_cart_items', None)
+                session.pop('buy_now_cart', None)
                 return redirect(url_for('view_cart'))
             
             if product.stock == 0:
                 flash(f'{product.name} is out of stock.', 'danger')
+                session.pop('selected_cart_items', None)
+                session.pop('buy_now_cart', None)
                 return redirect(url_for('view_cart'))
         
         # Calculate delivery fee based on address
         delivery_fee_obj = DeliveryFee.query.filter_by(
-            city=delivery_address.city
+            province=delivery_address.province
         ).first()
         
-        if not delivery_fee_obj and delivery_address.province:
-            # Try to find by province if city not found
+        if not delivery_fee_obj and delivery_address.municipality:
+            # Try to find by municipality if province not found
             delivery_fee_obj = DeliveryFee.query.filter_by(
                 province=delivery_address.province
             ).first()
@@ -908,12 +1231,12 @@ def checkout():
         
         # Group items by shop
         shop_orders = {}
-        for product_id, quantity in cart.items():
-            product = Product.query.get(int(product_id))
-            if product:
+        for cart_item in cart_items_db:
+            product = cart_item.product
+            if product and product.is_active:
                 if product.shop_id not in shop_orders:
                     shop_orders[product.shop_id] = []
-                shop_orders[product.shop_id].append((product, quantity))
+                shop_orders[product.shop_id].append((product, cart_item.quantity))
         
         # Create order for each shop
         for shop_id, items in shop_orders.items():
@@ -922,13 +1245,17 @@ def checkout():
             # Calculate total with delivery fee
             total_amount = subtotal + delivery_fee
             
-            # Calculate commission on subtotal (not including delivery fee)
+            # Calculate commission on subtotal (not including delivery fee) - 5% per transaction
             commission = subtotal * 0.05
             seller_amount = subtotal - commission
             
+            # Calculate courier/rider earnings split
+            courier_earnings = delivery_fee * 0.60  # 60% to courier
+            rider_earnings = delivery_fee * 0.40  # 40% to rider
+            
             order = Order(
                 order_number=generate_order_number(),
-                customer_id=session['user_id'],
+                customer_id=user_id,
                 shop_id=shop_id,
                 delivery_address_id=address_id,
                 subtotal=subtotal,
@@ -937,6 +1264,8 @@ def checkout():
                 commission_rate=5.00,
                 commission_amount=commission,
                 seller_amount=seller_amount,
+                courier_earnings=courier_earnings,
+                rider_earnings=rider_earnings,
                 status='PENDING_PAYMENT'
             )
             db.session.add(order)
@@ -960,15 +1289,21 @@ def checkout():
             
             log_action('ORDER_CREATED', 'Order', order.id, f'Order {order.order_number}')
         
-        db.session.commit()
-        
-        # Clear both regular cart and buy_now_cart
-        session['cart'] = {}
-        if 'buy_now_cart' in session:
-            session.pop('buy_now_cart')
+        # Clear cart items based on checkout type
+        if buy_now_cart:
+            # Clear Buy Now session
+            session.pop('buy_now_cart', None)
+        else:
+            # Clear only the checked-out cart items from database
+            for cart_item in cart_items_db:
+                db.session.delete(cart_item)
+            db.session.commit()
+            
+            # Clear selected items from session
+            session.pop('selected_cart_items', None)
         
         # Send confirmation email
-        user = User.query.get(session['user_id'])
+        user = User.query.get(user_id)
         send_email(
             user.email,
             'Order Confirmation',
@@ -981,20 +1316,20 @@ def checkout():
     # Calculate cart preview with delivery fee estimate
     cart_items = []
     subtotal = 0
-    for product_id, quantity in cart.items():
-        product = Product.query.get(int(product_id))
+    for cart_item in cart_items_db:
+        product = cart_item.product
         if product:
-            item_total = float(product.price) * quantity
+            item_total = float(product.price) * cart_item.quantity
             subtotal += item_total
             cart_items.append({
                 'product': product,
-                'quantity': quantity,
+                'quantity': cart_item.quantity,
                 'subtotal': item_total
             })
     
     # Get delivery fee estimate if user has a default address
     default_address = Address.query.filter_by(
-        user_id=session['user_id'], 
+        user_id=user_id, 
         is_default=True
     ).first()
     
@@ -1307,6 +1642,17 @@ def seller_dashboard():
     recent_orders = Order.query.filter_by(shop_id=user.shop.id)\
         .order_by(Order.created_at.desc()).limit(5).all()
     
+    # Withdrawal calculations (all time - for accurate accounting)
+    # Total sales (subtotal) from delivered orders
+    total_delivered_sales = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Commission calculation (5% of subtotal)
+    admin_commission = total_delivered_sales * Decimal('0.05')
+    
+    # Withdrawable amount (95% of subtotal = seller earnings)
+    withdrawable_amount = total_delivered_sales * Decimal('0.95')
+    
     return render_template('seller_dashboard.html',
         shop=user.shop,
         total_products=total_products,
@@ -1319,9 +1665,64 @@ def seller_dashboard():
         revenue_chart_data=revenue_chart_data,
         top_products=top_products,
         time_filter=time_filter,
+        # Withdrawal data
+        total_delivered_sales=total_delivered_sales,
+        admin_commission=admin_commission,
+        withdrawable_amount=withdrawable_amount,
         start_date=start_date_str,
         end_date=end_date_str,
         recent_orders=recent_orders
+    )
+
+
+@app.route('/seller/sales-report')
+@login_required
+@role_required('seller')
+def seller_sales_report():
+    """Detailed sales report showing 5% commission breakdown per transaction"""
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        return redirect(url_for('create_shop'))
+    
+    # Get filter parameters
+    status_filter = request.args.get('status', 'all')
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    # Build query
+    query = Order.query.filter_by(shop_id=user.shop.id)
+    
+    if status_filter != 'all':
+        query = query.filter_by(status=status_filter)
+    
+    # Get paginated orders
+    orders_pagination = query.order_by(Order.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    
+    # Calculate totals
+    total_orders = query.count()
+    delivered_orders = Order.query.filter_by(shop_id=user.shop.id, status='DELIVERED').count()
+    
+    # Revenue summary
+    total_sales = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    total_commission = db.session.query(func.sum(Order.commission_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    total_earnings = db.session.query(func.sum(Order.seller_amount))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    
+    return render_template('seller_sales_report.html',
+        shop=user.shop,
+        orders=orders_pagination.items,
+        pagination=orders_pagination,
+        status_filter=status_filter,
+        total_orders=total_orders,
+        delivered_orders=delivered_orders,
+        total_sales=total_sales,
+        total_commission=total_commission,
+        total_earnings=total_earnings
     )
 
 
@@ -1542,18 +1943,51 @@ def mark_order_ready(order_id):
 @login_required
 @role_required('courier')
 def courier_dashboard():
+    from sqlalchemy import func
+    
+    user_id = session['user_id']
+    
     # Show available orders to pickup
     available_orders = Order.query.filter_by(status='READY_FOR_PICKUP', courier_id=None)\
         .order_by(Order.created_at.desc()).all()
     
     # Show assigned orders
-    my_orders = Order.query.filter_by(courier_id=session['user_id'])\
+    my_orders = Order.query.filter_by(courier_id=user_id)\
         .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Earnings statistics
+    total_deliveries = Order.query.filter_by(courier_id=user_id, status='DELIVERED').count()
+    pending_deliveries = Order.query.filter_by(courier_id=user_id)\
+        .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'])).count()
+    
+    # Total earnings (60% of delivery fee for completed deliveries)
+    total_earnings = db.session.query(func.sum(Order.courier_earnings))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Pending earnings (not yet delivered)
+    pending_earnings = db.session.query(func.sum(Order.courier_earnings))\
+        .filter(Order.courier_id == user_id, 
+                Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'])).scalar() or 0
+    
+    # Withdrawal information - total delivery fees from completed orders
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Courier gets 60% of delivery fees
+    courier_commission = total_delivery_fees * 0.40  # Platform keeps 40%
+    available_to_withdraw = total_earnings  # Already calculated as 60% of delivery fees
+    
     return render_template('courier_dashboard.html', 
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        pending_deliveries=pending_deliveries,
+        total_earnings=total_earnings,
+        pending_earnings=pending_earnings,
+        total_delivery_fees=total_delivery_fees,
+        courier_commission=courier_commission,
+        available_to_withdraw=available_to_withdraw
     )
 
 
@@ -1632,18 +2066,49 @@ def courier_handoff_qr(order_id):
 @login_required
 @role_required('rider')
 def rider_dashboard():
+    from sqlalchemy import func
+    
+    user_id = session['user_id']
+    
     # Orders ready for rider pickup from courier
     available_orders = Order.query.filter_by(status='IN_TRANSIT_TO_RIDER', rider_id=None)\
         .order_by(Order.created_at.desc()).all()
     
     # Orders assigned to this rider
-    my_orders = Order.query.filter_by(rider_id=session['user_id'])\
+    my_orders = Order.query.filter_by(rider_id=user_id)\
         .filter(Order.status.in_(['OUT_FOR_DELIVERY']))\
         .order_by(Order.created_at.desc()).all()
     
+    # Earnings statistics
+    total_deliveries = Order.query.filter_by(rider_id=user_id, status='DELIVERED').count()
+    pending_deliveries = Order.query.filter_by(rider_id=user_id, status='OUT_FOR_DELIVERY').count()
+    
+    # Total earnings (40% of delivery fee for completed deliveries)
+    total_earnings = db.session.query(func.sum(Order.rider_earnings))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Pending earnings (not yet delivered)
+    pending_earnings = db.session.query(func.sum(Order.rider_earnings))\
+        .filter(Order.rider_id == user_id, Order.status == 'OUT_FOR_DELIVERY').scalar() or 0
+    
+    # Withdrawal information - total delivery fees from completed orders
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or 0
+    
+    # Rider gets 40% of delivery fees
+    rider_commission = total_delivery_fees * 0.60  # Platform keeps 60% (or shares with courier)
+    available_to_withdraw = total_earnings  # Already calculated as 40% of delivery fees
+    
     return render_template('rider_dashboard.html',
         available_orders=available_orders,
-        my_orders=my_orders
+        my_orders=my_orders,
+        total_deliveries=total_deliveries,
+        pending_deliveries=pending_deliveries,
+        total_earnings=total_earnings,
+        pending_earnings=pending_earnings,
+        total_delivery_fees=total_delivery_fees,
+        rider_commission=rider_commission,
+        available_to_withdraw=available_to_withdraw
     )
 
 
@@ -1999,6 +2464,85 @@ def admin_users():
     )
 
 
+@app.route('/admin/user/suspend/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def suspend_user(user_id):
+    """Suspend a user account"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot suspend admin accounts.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    reason = request.form.get('reason', 'Account suspended by admin')
+    
+    user.is_suspended = True
+    user.suspension_reason = reason
+    db.session.commit()
+    
+    log_action('USER_SUSPENDED', 'User', user.id, f'Suspended: {reason}')
+    
+    # Send email notification
+    send_email(
+        user.email,
+        'Account Suspended',
+        f'Your account has been suspended.\nReason: {reason}\n\nPlease contact support if you have questions.'
+    )
+    
+    flash(f'User account suspended successfully.', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/unsuspend/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def unsuspend_user(user_id):
+    """Unsuspend a user account"""
+    user = User.query.get_or_404(user_id)
+    
+    user.is_suspended = False
+    user.suspension_reason = None
+    db.session.commit()
+    
+    log_action('USER_UNSUSPENDED', 'User', user.id, 'Account reactivated')
+    
+    # Send email notification
+    send_email(
+        user.email,
+        'Account Reactivated',
+        'Your account has been reactivated. You can now log in and use all features.'
+    )
+    
+    flash(f'User account reactivated successfully.', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/delete/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def delete_user(user_id):
+    """Delete a user account and all associated data"""
+    user = User.query.get_or_404(user_id)
+    
+    if user.role == 'admin':
+        flash('Cannot delete admin accounts.', 'danger')
+        return redirect(url_for('admin_users'))
+    
+    user_email = user.email
+    user_name = user.full_name
+    user_role = user.role
+    
+    # Delete user (cascading will handle related records)
+    db.session.delete(user)
+    db.session.commit()
+    
+    log_action('USER_DELETED', 'User', user_id, f'Deleted {user_role}: {user_name}')
+    
+    flash(f'User account "{user_name}" deleted successfully.', 'info')
+    return redirect(url_for('admin_users'))
+
+
 @app.route('/admin/categories', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
@@ -2039,8 +2583,41 @@ def delete_category(category_id):
 @login_required
 @role_required('admin')
 def admin_orders():
-    orders = Order.query.order_by(Order.created_at.desc()).all()
-    return render_template('admin_orders.html', orders=orders)
+    # Get sort parameters
+    sort_by = request.args.get('sort', 'date')
+    direction = request.args.get('direction', 'desc')
+    
+    # Base query
+    query = Order.query
+    
+    # Apply sorting
+    if sort_by == 'order_number':
+        if direction == 'asc':
+            query = query.order_by(Order.order_number.asc())
+        else:
+            query = query.order_by(Order.order_number.desc())
+    elif sort_by == 'shop':
+        query = query.join(Shop).order_by(Shop.name.asc() if direction == 'asc' else Shop.name.desc())
+    elif sort_by == 'customer':
+        query = query.join(User, Order.customer_id == User.id).order_by(User.full_name.asc() if direction == 'asc' else User.full_name.desc())
+    elif sort_by == 'amount':
+        if direction == 'asc':
+            query = query.order_by(Order.total_amount.asc())
+        else:
+            query = query.order_by(Order.total_amount.desc())
+    elif sort_by == 'status':
+        if direction == 'asc':
+            query = query.order_by(Order.status.asc())
+        else:
+            query = query.order_by(Order.status.desc())
+    else:  # date (default)
+        if direction == 'asc':
+            query = query.order_by(Order.created_at.asc())
+        else:
+            query = query.order_by(Order.created_at.desc())
+    
+    orders = query.all()
+    return render_template('admin_orders.html', orders=orders, sort_by=sort_by, direction=direction)
 
 
 @app.route('/admin/analytics')
@@ -2070,13 +2647,60 @@ def admin_analytics():
     ).join(OrderItem).group_by(Product.id)\
         .order_by(func.sum(OrderItem.quantity).desc()).limit(10).all()
     
+    # Get seller-specific earnings with sorting
+    sort_by = request.args.get('sort', 'earnings')
+    direction = request.args.get('direction', 'desc')
+    
+    seller_earnings_query = db.session.query(
+        User.id,
+        User.full_name,
+        Shop.name.label('shop_name'),
+        func.count(Order.id).label('total_orders'),
+        func.sum(Order.total_amount).label('total_revenue'),
+        func.sum(Order.commission_amount).label('total_commission'),
+        func.sum(Order.seller_amount).label('total_earnings')
+    ).join(Shop, User.id == Shop.seller_id)\
+     .join(Order, Shop.id == Order.shop_id)\
+     .filter(Order.status == 'DELIVERED')\
+     .group_by(User.id, User.full_name, Shop.name)
+    
+    # Apply sorting
+    if sort_by == 'seller':
+        seller_earnings_query = seller_earnings_query.order_by(
+            User.full_name.asc() if direction == 'asc' else User.full_name.desc()
+        )
+    elif sort_by == 'shop':
+        seller_earnings_query = seller_earnings_query.order_by(
+            Shop.name.asc() if direction == 'asc' else Shop.name.desc()
+        )
+    elif sort_by == 'orders':
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.count(Order.id).asc() if direction == 'asc' else func.count(Order.id).desc()
+        )
+    elif sort_by == 'revenue':
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.sum(Order.total_amount).asc() if direction == 'asc' else func.sum(Order.total_amount).desc()
+        )
+    elif sort_by == 'commission':
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.sum(Order.commission_amount).asc() if direction == 'asc' else func.sum(Order.commission_amount).desc()
+        )
+    else:  # earnings (default)
+        seller_earnings_query = seller_earnings_query.order_by(
+            func.sum(Order.seller_amount).asc() if direction == 'asc' else func.sum(Order.seller_amount).desc()
+        )
+    
+    seller_earnings_data = seller_earnings_query.all()
     
     return render_template('admin_analytics.html',
         total_revenue=total_revenue,
         total_commission=total_commission,
         seller_earnings=seller_earnings,
         orders_by_status=orders_by_status,
-        top_products=top_products
+        top_products=top_products,
+        seller_earnings_data=seller_earnings_data,
+        sort_by=sort_by,
+        direction=direction
     )
 
 
@@ -2287,6 +2911,74 @@ def start_conversation_with_rider(order_id):
     return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
 
+@app.route('/messages/start-with-courier/<int:order_id>')
+@login_required
+def start_conversation_with_courier(order_id):
+    """Start or continue a conversation with the courier for an order"""
+    user = User.query.get(session['user_id'])
+    order = Order.query.get_or_404(order_id)
+    
+    # Check authorization - only buyer or seller can message courier
+    if user.role not in ['buyer', 'seller'] and user.id != order.courier_id:
+        flash('You are not authorized to view this conversation.', 'danger')
+        return redirect(url_for('index'))
+    
+    # Check if order has a courier assigned
+    if not order.courier_id:
+        flash('No courier has been assigned to this order yet.', 'warning')
+        return redirect(url_for('order_details', order_id=order_id))
+    
+    courier = User.query.get(order.courier_id)
+    
+    # Determine conversation type based on who is initiating
+    if user.role == 'buyer':
+        conv_type = 'buyer_courier'
+        user1_id = user.id
+        user2_id = courier.id
+    elif user.role == 'seller':
+        conv_type = 'seller_courier'
+        user1_id = order.seller_id
+        user2_id = courier.id
+    else:  # User is the courier
+        # Find existing conversation
+        if user.id == order.courier_id:
+            # Courier responding to buyer or seller
+            existing_conv = Conversation.query.filter(
+                Conversation.order_id == order_id,
+                Conversation.conversation_type.in_(['buyer_courier', 'seller_courier']),
+                Conversation.user2_id == user.id
+            ).first()
+            if existing_conv:
+                return redirect(url_for('view_conversation', conversation_id=existing_conv.id))
+        flash('Conversation not found.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+    
+    # Check for existing conversation
+    existing_conv = Conversation.query.filter(
+        Conversation.order_id == order_id,
+        Conversation.conversation_type == conv_type,
+        Conversation.user1_id == user1_id,
+        Conversation.user2_id == user2_id
+    ).first()
+    
+    if existing_conv:
+        return redirect(url_for('view_conversation', conversation_id=existing_conv.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=user1_id,
+        user2_id=user2_id,
+        order_id=order.id,
+        conversation_type=conv_type
+    )
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With courier for order {order.order_number}')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
 @app.route('/messages/check-new/<int:conversation_id>')
 @login_required
 def check_new_messages(conversation_id):
@@ -2342,7 +3034,7 @@ def start_support_chat():
     
     if not support_agent:
         flash('No support agents are currently available. Please try again later.', 'warning')
-        return redirect(request.referrer or url_for('customer_dashboard'))
+        return redirect(request.referrer or url_for('index'))
     
     # Create new support conversation
     conversation = Conversation(
@@ -2369,7 +3061,7 @@ def support_conversation(conversation_id):
     # Verify access
     if user.id not in [conversation.user1_id, conversation.user2_id]:
         flash('You do not have access to this conversation.', 'danger')
-        return redirect(url_for('customer_dashboard'))
+        return redirect(url_for('index'))
     
     # Mark messages as read
     Message.query.filter(
@@ -2439,7 +3131,7 @@ def support_dashboard():
     
     if not user.is_support_agent and user.role != 'admin':
         flash('You do not have access to the support dashboard.', 'danger')
-        return redirect(url_for('customer_dashboard'))
+        return redirect(url_for('index'))
     
     # Get all support conversations
     conversations = Conversation.query.filter_by(
