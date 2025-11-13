@@ -5,6 +5,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from functools import wraps
+from decimal import Decimal
 import jwt
 import qrcode
 import io
@@ -1647,10 +1648,10 @@ def seller_dashboard():
         .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
     
     # Commission calculation (5% of subtotal)
-    admin_commission = total_delivered_sales * 0.05
+    admin_commission = total_delivered_sales * Decimal('0.05')
     
     # Withdrawable amount (95% of subtotal = seller earnings)
-    withdrawable_amount = total_delivered_sales * 0.95
+    withdrawable_amount = total_delivered_sales * Decimal('0.95')
     
     return render_template('seller_dashboard.html',
         shop=user.shop,
