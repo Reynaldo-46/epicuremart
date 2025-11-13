@@ -9,6 +9,12 @@
         margin: 2rem auto;
     }
     
+    @media (max-width: 768px) {
+        .chat-container {
+            margin: 1rem;
+        }
+    }
+    
     .chat-card {
         border-radius: 16px;
         overflow: hidden;
@@ -65,23 +71,47 @@
     
     .chat-messages {
         height: 550px;
+        max-height: calc(100vh - 300px);
         overflow-y: auto;
+        overflow-x: hidden;
         padding: 1.5rem;
         background: #f8f9fa;
         scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    @media (max-width: 768px) {
+        .chat-messages {
+            height: calc(100vh - 280px);
+            max-height: calc(100vh - 280px);
+            padding: 1rem;
+        }
+    }
+    
+    @media (max-width: 576px) {
+        .chat-messages {
+            height: calc(100vh - 260px);
+            max-height: calc(100vh - 260px);
+        }
     }
     
     .chat-messages::-webkit-scrollbar {
-        width: 6px;
+        width: 8px;
     }
     
     .chat-messages::-webkit-scrollbar-track {
-        background: #f1f1f1;
+        background: #e5e7eb;
+        border-radius: 4px;
     }
     
     .chat-messages::-webkit-scrollbar-thumb {
         background: #cbd5e0;
-        border-radius: 3px;
+        border-radius: 4px;
+        transition: background 0.2s;
+    }
+    
+    .chat-messages::-webkit-scrollbar-thumb:hover {
+        background: #a0aec0;
     }
     
     .message-wrapper {
@@ -362,12 +392,27 @@
 
 <script>
 // Auto-scroll to bottom
-function scrollToBottom() {
+function scrollToBottom(smooth = true) {
     var container = document.getElementById('messageContainer');
-    container.scrollTop = container.scrollHeight;
+    if (container) {
+        if (smooth) {
+            container.scrollTo({
+                top: container.scrollHeight,
+                behavior: 'smooth'
+            });
+        } else {
+            container.scrollTop = container.scrollHeight;
+        }
+    }
 }
 
-scrollToBottom();
+// Scroll to bottom on page load (immediate)
+scrollToBottom(false);
+
+// Scroll after images load
+window.addEventListener('load', function() {
+    scrollToBottom(false);
+});
 
 // Handle form submission
 document.getElementById('messageForm').addEventListener('submit', function(e) {
