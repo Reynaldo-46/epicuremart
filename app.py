@@ -40,6 +40,23 @@ mail = Mail(app)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
+# Predefined icons for categories
+CATEGORY_ICONS = [
+    '🧁', '☕', '🍬', '🌍', '🥗', '🍱',
+    '🍕', '🍔', '🍟', '🌮', '🍝', '🍜',
+    '🍱', '🍛', '🍲', '🥘', '🍳', '🥞',
+    '🥐', '🥖', '🥨', '🧀', '🍖', '🍗',
+    '🥩', '🥓', '🍤', '🍣', '🦞', '🦀',
+    '🐟', '🥦', '🥬', '🥒', '🌶️', '🌽',
+    '🥕', '🧄', '🧅', '🥔', '🍠', '🥜',
+    '🍯', '🥛', '🧃', '🧋', '🍷', '🍺',
+    '🧊', '🍰', '🎂', '🧁', '🥧', '🍦',
+    '🍧', '🍨', '🍩', '🍪', '🍫', '🍬',
+    '🍭', '🍮', '🍯', '🍎', '🍏', '🍊',
+    '🍋', '🍌', '🍉', '🍇', '🍓', '🫐',
+    '🍈', '🍒', '🍑', '🥭', '🍍', '🥥'
+]
+
 # ==================== MODELS ====================
 
 class User(db.Model):
@@ -102,6 +119,7 @@ class Category(db.Model):
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     icon = db.Column(db.String(50))
+    background_image = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     products = db.relationship('Product', backref='category')
@@ -2555,7 +2573,23 @@ def admin_categories():
         description = request.form.get('description')
         icon = request.form.get('icon')
         
-        category = Category(name=name, description=description, icon=icon)
+        # Handle background image upload
+        background_image = None
+        if 'background_image' in request.files:
+            file = request.files['background_image']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                unique_filename = f"category_bg_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                file.save(filepath)
+                background_image = unique_filename
+        
+        category = Category(
+            name=name, 
+            description=description, 
+            icon=icon,
+            background_image=background_image
+        )
         db.session.add(category)
         db.session.commit()
         
@@ -2564,7 +2598,7 @@ def admin_categories():
         return redirect(url_for('admin_categories'))
     
     categories = Category.query.all()
-    return render_template('admin_categories.html', categories=categories)
+    return render_template('admin_categories.html', categories=categories, category_icons=CATEGORY_ICONS)
 
 
 @app.route('/admin/category/<int:category_id>/delete', methods=['POST'])
