@@ -3241,7 +3241,8 @@ def manage_support_agents():
     
     return render_template('admin_support_agents.html',
         support_agents=support_agents,
-        all_users=all_users
+        all_users=all_users,
+        now=datetime.utcnow()
     )
 
 
