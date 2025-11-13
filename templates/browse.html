@@ -115,27 +115,39 @@
             <div class="row g-4" id="productsGrid">
                 {% if products %}
                 {% for product in products %}
-                <div class="col-sm-6 col-lg-4 col-xl-3 product-item" data-price="{{ product.price }}" data-name="{{ product.name }}" data-stock="{{ product.stock }}">
-                    <div class="card product-card h-100">
-                    <a href="{{ url_for('product_detail', product_id=product.id) }}" class="text-decoration-none">
-                        {% if product.image %}
-                        <img src="{{ url_for('static', filename='uploads/' + product.image) }}" 
-                             class="product-image" alt="{{ product.name }}">
-                        {% else %}
-                        <div class="product-image d-flex align-items-center justify-content-center" 
-                             style="background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);">
-                            <i class="fas fa-image fa-3x text-secondary opacity-25"></i>
-                        </div>
-                        {% endif %}
+                <div class="col-sm-6 col-lg-4 col-xl-3 product-item scroll-reveal-browse" data-price="{{ product.price }}" data-name="{{ product.name }}" data-stock="{{ product.stock }}">
+                    <div class="card product-card-browse h-100 border-0">
+                        <a href="{{ url_for('product_detail', product_id=product.id) }}" class="text-decoration-none position-relative">
+                            <div class="product-image-container">
+                                {% if product.image %}
+                                <img src="{{ url_for('static', filename='uploads/' + product.image) }}" 
+                                     class="product-image-browse" alt="{{ product.name }}">
+                                <div class="product-hover-overlay">
+                                    <div class="hover-icon">
+                                        <i class="fas fa-search-plus"></i>
+                                    </div>
+                                </div>
+                                {% else %}
+                                <div class="product-image-browse d-flex align-items-center justify-content-center" 
+                                     style="background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);">
+                                    <i class="fas fa-image fa-3x text-secondary opacity-25"></i>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </a>
                         
-                        <div class="product-overlay">
+                        <div class="product-badges-overlay">
                             {% if product.stock == 0 %}
-                            <span class="badge bg-dark">Out of Stock</span>
+                            <span class="badge badge-modern-dark">Out of Stock</span>
                             {% elif product.stock < 10 %}
-                            <span class="badge bg-warning">Only {{ product.stock }} left!</span>
+                            <span class="badge badge-modern-warning">
+                                <i class="fas fa-fire me-1"></i>{{ product.stock }} left!
+                            </span>
                             {% endif %}
                         </div>
-                    </a>
+                        
+                        <!-- Color-coded availability indicator -->
+                        <div class="availability-indicator {% if product.stock > 10 %}indicator-green{% elif product.stock > 0 %}indicator-yellow{% else %}indicator-red{% endif %}"></div>
                     
                     <div class="card-body d-flex flex-column">
                         <div class="mb-2">
@@ -144,22 +156,22 @@
                             </small>
                         </div>
                         <a href="{{ url_for('product_detail', product_id=product.id) }}" class="text-decoration-none text-dark">
-                            <h5 class="card-title fw-bold mb-2">{{ product.name }}</h5>
+                            <h5 class="card-title fw-bold mb-2 product-name-browse">{{ product.name }}</h5>
                         </a>
                         
                         <!-- Rating Display -->
                         {% set reviews = product.reviews %}
                         {% if reviews %}
                             {% set avg_rating = (reviews|sum(attribute='rating')) / (reviews|length) %}
-                            <div class="mb-2">
+                            <div class="mb-2 rating-display">
                                 <small>
                                     {% for i in range(1, 6) %}
                                         {% if i <= avg_rating %}
-                                        <i class="fas fa-star text-warning"></i>
+                                        <i class="fas fa-star rating-star"></i>
                                         {% elif i - 0.5 <= avg_rating %}
-                                        <i class="fas fa-star-half-alt text-warning"></i>
+                                        <i class="fas fa-star-half-alt rating-star"></i>
                                         {% else %}
-                                        <i class="far fa-star text-warning"></i>
+                                        <i class="far fa-star rating-star-empty"></i>
                                         {% endif %}
                                     {% endfor %}
                                     <span class="text-muted ms-1">({{ reviews|length }})</span>
@@ -167,43 +179,45 @@
                             </div>
                         {% endif %}
                         
-                        <p class="card-text text-muted small mb-3 flex-grow-1">
+                        <p class="card-text text-muted small mb-3 product-desc-browse">
                             {{ product.description[:80] }}{% if product.description|length > 80 %}...{% endif %}
                         </p>
                         
                         <div class="mb-3">
-                            <span class="badge bg-light text-dark me-2">
+                            <span class="badge badge-category-modern">
                                 <i class="fas fa-tag me-1"></i>{{ product.category.name.split('&')[0].strip() }}
                             </span>
                         </div>
                         
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <span class="price">₱{{ "%.2f"|format(product.price) }}</span>
-                            <span class="badge {% if product.stock > 0 %}bg-success{% else %}bg-secondary{% endif %}">
-                                {{ product.stock }} in stock
+                            <span class="price-modern">₱{{ "%.2f"|format(product.price) }}</span>
+                            <span class="badge stock-indicator-badge {% if product.stock > 10 %}bg-success-soft{% elif product.stock > 0 %}bg-warning-soft{% else %}bg-secondary{% endif %}">
+                                <i class="fas fa-box me-1"></i>{{ product.stock }}
                             </span>
                         </div>
                         
                         {% if session.user_id and session.role == 'customer' %}
                             {% if product.stock > 0 %}
-                            <div class="d-flex gap-2 align-items-stretch">
+                            <div class="product-actions-group">
                                 <form method="POST" action="{{ url_for('add_to_cart', product_id=product.id) }}" class="flex-grow-1">
-                                    <div class="input-group input-group-sm">
-                                        <button type="button" class="btn btn-outline-secondary" onclick="decrementQty(this)">
-                                            <i class="fas fa-minus"></i>
-                                        </button>
-                                        <input type="number" name="quantity" class="form-control text-center qty-input" 
-                                               value="1" min="1" max="{{ product.stock }}" readonly>
-                                        <button type="button" class="btn btn-outline-secondary" onclick="incrementQty(this, {{ product.stock }})">
-                                            <i class="fas fa-plus"></i>
-                                        </button>
-                                        <button type="submit" class="btn btn-primary">
+                                    <div class="qty-add-wrapper">
+                                        <div class="qty-selector-browse">
+                                            <button type="button" class="qty-btn-browse" onclick="decrementQty(this)">
+                                                <i class="fas fa-minus"></i>
+                                            </button>
+                                            <input type="number" name="quantity" class="qty-input-browse" 
+                                                   value="1" min="1" max="{{ product.stock }}" readonly>
+                                            <button type="button" class="qty-btn-browse" onclick="incrementQty(this, {{ product.stock }})">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                        </div>
+                                        <button type="submit" class="btn-cart-modern">
                                             <i class="fas fa-cart-plus"></i>
                                         </button>
                                     </div>
                                 </form>
                                 <a href="{{ url_for('product_detail', product_id=product.id) }}" 
-                                   class="btn btn-sm btn-outline-primary" title="View Details">
+                                   class="btn-view-modern" title="View Details">
                                     <i class="fas fa-eye"></i>
                                 </a>
                             </div>
@@ -218,7 +232,7 @@
                                class="btn btn-outline-primary btn-sm">
                                 <i class="fas fa-eye me-1"></i>View Details
                             </a>
-                            <a href="{{ url_for('login') }}" class="btn btn-primary btn-sm">
+                            <a href="{{ url_for('login') }}" class="btn btn-primary-modern btn-sm">
                                 <i class="fas fa-sign-in-alt me-1"></i>Login to Buy
                             </a>
                         </div>
@@ -334,17 +348,319 @@
         border-color: var(--primary);
     }
     
-    /* Responsive Adjustments */
-    @media (max-width: 991px) {
-        .filters-sidebar {
-            position: static !important;
-        }
+    /* ===== PREMIUM BROWSE PAGE STYLES ===== */
+    
+    /* Product Cards */
+    .product-card-browse {
+        background: white;
+        border-radius: 1.25rem;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        position: relative;
     }
     
-    @media (max-width: 576px) {
-        .search-form-enhanced .btn {
-            padding: 0.5rem 1rem;
-            font-size: 0.875rem;
+    .product-card-browse:hover {
+        transform: translateY(-10px);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    }
+    
+    .product-image-container {
+        position: relative;
+        overflow: hidden;
+        height: 280px;
+    }
+    
+    .product-image-browse {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.5s ease;
+    }
+    
+    .product-card-browse:hover .product-image-browse {
+        transform: scale(1.15);
+    }
+    
+    .product-hover-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(99, 102, 241, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    
+    .product-card-browse:hover .product-hover-overlay {
+        opacity: 1;
+    }
+    
+    .hover-icon {
+        width: 60px;
+        height: 60px;
+        background: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform: scale(0.5);
+        transition: transform 0.3s ease;
+    }
+    
+    .product-card-browse:hover .hover-icon {
+        transform: scale(1);
+    }
+    
+    .hover-icon i {
+        font-size: 1.5rem;
+        color: var(--primary);
+    }
+    
+    /* Badges */
+    .product-badges-overlay {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        z-index: 10;
+    }
+    
+    .badge-modern-dark {
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(10px);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 2rem;
+        font-weight: 600;
+        font-size: 0.75rem;
+    }
+    
+    .badge-modern-warning {
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 2rem;
+        font-weight: 600;
+        font-size: 0.75rem;
+        box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+        animation: pulse 2s ease-in-out infinite;
+    }
+    
+    /* Color-coded availability indicator */
+    .availability-indicator {
+        position: absolute;
+        bottom: 280px;
+        left: 0;
+        width: 100%;
+        height: 4px;
+        z-index: 5;
+    }
+    
+    .indicator-green {
+        background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+    }
+    
+    .indicator-yellow {
+        background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+    }
+    
+    .indicator-red {
+        background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+    }
+    
+    /* Typography */
+    .product-name-browse {
+        font-size: 1.05rem;
+        line-height: 1.3;
+        height: 2.6em;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        transition: color 0.3s ease;
+    }
+    
+    .product-card-browse:hover .product-name-browse {
+        color: var(--primary) !important;
+    }
+    
+    .product-desc-browse {
+        height: 3em;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+    
+    /* Rating Stars */
+    .rating-star {
+        color: #f59e0b;
+        font-size: 0.875rem;
+    }
+    
+    .rating-star-empty {
+        color: #e5e7eb;
+        font-size: 0.875rem;
+    }
+    
+    /* Badges */
+    .badge-category-modern {
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        color: var(--dark);
+        padding: 0.5rem 0.75rem;
+        border-radius: 2rem;
+        font-weight: 600;
+        font-size: 0.75rem;
+        border: 1px solid #e2e8f0;
+    }
+    
+    /* Price */
+    .price-modern {
+        font-size: 1.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    .stock-indicator-badge {
+        font-size: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: 2rem;
+        font-weight: 600;
+    }
+    
+    .bg-success-soft {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .bg-warning-soft {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    /* Product Actions */
+    .product-actions-group {
+        display: flex;
+        gap: 0.5rem;
+        align-items: stretch;
+    }
+    
+    .qty-add-wrapper {
+        display: flex;
+        flex: 1;
+        gap: 0.5rem;
+    }
+    
+    .qty-selector-browse {
+        display: flex;
+        flex: 1;
+        background: #f8fafc;
+        border-radius: 0.75rem;
+        overflow: hidden;
+        border: 2px solid #e2e8f0;
+    }
+    
+    .qty-btn-browse {
+        background: transparent;
+        border: none;
+        padding: 0.5rem 0.75rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        color: var(--dark);
+    }
+    
+    .qty-btn-browse:hover {
+        background: var(--primary);
+        color: white;
+    }
+    
+    .qty-input-browse {
+        flex: 1;
+        border: none;
+        background: transparent;
+        text-align: center;
+        font-weight: 600;
+        pointer-events: none;
+        min-width: 40px;
+    }
+    
+    .btn-cart-modern {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        border: none;
+        border-radius: 0.75rem;
+        padding: 0 1rem;
+        color: white;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        cursor: pointer;
+    }
+    
+    .btn-cart-modern:hover {
+        transform: scale(1.05);
+        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+    }
+    
+    .btn-cart-modern i {
+        font-size: 1.25rem;
+    }
+    
+    .btn-view-modern {
+        background: white;
+        border: 2px solid #e2e8f0;
+        border-radius: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        color: var(--dark);
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+    }
+    
+    .btn-view-modern:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+        background: rgba(99, 102, 241, 0.05);
+    }
+    
+    .btn-primary-modern {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        border: none;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
+    
+    .btn-primary-modern:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+    }
+    
+    /* Scroll Reveal */
+    .scroll-reveal-browse {
+        opacity: 0;
+        transform: translateY(30px);
+        transition: all 0.6s ease;
+    }
+    
+    .scroll-reveal-browse.revealed {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+        .product-image-container {
+            height: 220px;
+        }
+        
+        .availability-indicator {
+            bottom: 220px;
         }
     }
 </style>
@@ -352,7 +668,7 @@
 <script>
     // Quantity controls
     function incrementQty(btn, max) {
-        const input = btn.parentElement.querySelector('.qty-input');
+        const input = btn.closest('.qty-selector-browse').querySelector('.qty-input-browse');
         const currentVal = parseInt(input.value) || 1;
         if (currentVal < max) {
             input.value = currentVal + 1;
@@ -360,12 +676,33 @@
     }
     
     function decrementQty(btn) {
-        const input = btn.parentElement.querySelector('.qty-input');
+        const input = btn.closest('.qty-selector-browse').querySelector('.qty-input-browse');
         const currentVal = parseInt(input.value) || 1;
         if (currentVal > 1) {
             input.value = currentVal - 1;
         }
     }
+    
+    // Scroll Reveal Animation
+    document.addEventListener('DOMContentLoaded', function() {
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+        
+        const observer = new IntersectionObserver(function(entries) {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('revealed');
+                }
+            });
+        }, observerOptions);
+        
+        // Observe all product cards
+        document.querySelectorAll('.scroll-reveal-browse').forEach(el => {
+            observer.observe(el);
+        });
+    });
     
     // Sort products
     function applySorting(sortBy) {
