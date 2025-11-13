@@ -7,6 +7,21 @@
     .chat-container {
         max-width: 900px;
         margin: 2rem auto;
+        height: calc(100vh - 150px);
+    }
+    
+    @media (max-width: 768px) {
+        .chat-container {
+            margin: 1rem;
+            height: calc(100vh - 120px);
+        }
+    }
+    
+    @media (max-width: 576px) {
+        .chat-container {
+            margin: 0.5rem;
+            height: calc(100vh - 100px);
+        }
     }
     
     .chat-card {
@@ -14,12 +29,22 @@
         overflow: hidden;
         box-shadow: 0 8px 24px rgba(0,0,0,0.12);
         border: none;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
     }
     
     .chat-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 1.5rem;
         border: none;
+        flex-shrink: 0;
+    }
+    
+    @media (max-width: 576px) {
+        .chat-header {
+            padding: 1rem;
+        }
     }
     
     .user-info {
@@ -64,24 +89,46 @@
     }
     
     .chat-messages {
-        height: 550px;
+        flex: 1 1 auto;
         overflow-y: auto;
+        overflow-x: hidden;
         padding: 1.5rem;
         background: #f8f9fa;
         scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
+        min-height: 0;
+        position: relative;
+    }
+    
+    @media (max-width: 768px) {
+        .chat-messages {
+            padding: 1rem;
+        }
+    }
+    
+    @media (max-width: 576px) {
+        .chat-messages {
+            padding: 0.75rem;
+        }
     }
     
     .chat-messages::-webkit-scrollbar {
-        width: 6px;
+        width: 8px;
     }
     
     .chat-messages::-webkit-scrollbar-track {
-        background: #f1f1f1;
+        background: #e5e7eb;
+        border-radius: 4px;
     }
     
     .chat-messages::-webkit-scrollbar-thumb {
         background: #cbd5e0;
-        border-radius: 3px;
+        border-radius: 4px;
+        transition: background 0.2s;
+    }
+    
+    .chat-messages::-webkit-scrollbar-thumb:hover {
+        background: #a0aec0;
     }
     
     .message-wrapper {
@@ -174,6 +221,13 @@
         padding: 1.25rem;
         background: white;
         border-top: 1px solid #e5e7eb;
+        flex-shrink: 0;
+    }
+    
+    @media (max-width: 576px) {
+        .chat-input-area {
+            padding: 0.75rem;
+        }
     }
     
     .input-wrapper {
@@ -381,12 +435,27 @@
 
 <script>
 // Auto-scroll to bottom
-function scrollToBottom() {
+function scrollToBottom(smooth = true) {
     var container = document.getElementById('messageContainer');
-    container.scrollTop = container.scrollHeight;
+    if (container) {
+        if (smooth) {
+            container.scrollTo({
+                top: container.scrollHeight,
+                behavior: 'smooth'
+            });
+        } else {
+            container.scrollTop = container.scrollHeight;
+        }
+    }
 }
 
-scrollToBottom();
+// Scroll to bottom on page load (immediate)
+setTimeout(() => scrollToBottom(false), 100);
+
+// Scroll after images load
+window.addEventListener('load', function() {
+    setTimeout(() => scrollToBottom(false), 100);
+});
 
 // Handle form submission
 document.getElementById('messageForm').addEventListener('submit', function(e) {
