@@ -190,7 +190,7 @@
                             <td>{{ order.customer.full_name }}</td>
                             <td>{{ order.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td>₱{{ "%.2f"|format(order.delivery_fee) }}</td>
-                            <td class="text-success">₱{{ "%.2f"|format(order.delivery_fee * 0.6) }}</td>
+                            <td class="text-success">₱{{ "%.2f"|format(order.delivery_fee * Decimal('0.6')) }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
