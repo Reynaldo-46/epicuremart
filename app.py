@@ -2905,6 +2905,74 @@ def start_conversation_with_rider(order_id):
     return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
 
+@app.route('/messages/start-with-courier/<int:order_id>')
+@login_required
+def start_conversation_with_courier(order_id):
+    """Start or continue a conversation with the courier for an order"""
+    user = User.query.get(session['user_id'])
+    order = Order.query.get_or_404(order_id)
+    
+    # Check authorization - only buyer or seller can message courier
+    if user.role not in ['buyer', 'seller'] and user.id != order.courier_id:
+        flash('You are not authorized to view this conversation.', 'danger')
+        return redirect(url_for('index'))
+    
+    # Check if order has a courier assigned
+    if not order.courier_id:
+        flash('No courier has been assigned to this order yet.', 'warning')
+        return redirect(url_for('order_details', order_id=order_id))
+    
+    courier = User.query.get(order.courier_id)
+    
+    # Determine conversation type based on who is initiating
+    if user.role == 'buyer':
+        conv_type = 'buyer_courier'
+        user1_id = user.id
+        user2_id = courier.id
+    elif user.role == 'seller':
+        conv_type = 'seller_courier'
+        user1_id = order.seller_id
+        user2_id = courier.id
+    else:  # User is the courier
+        # Find existing conversation
+        if user.id == order.courier_id:
+            # Courier responding to buyer or seller
+            existing_conv = Conversation.query.filter(
+                Conversation.order_id == order_id,
+                Conversation.conversation_type.in_(['buyer_courier', 'seller_courier']),
+                Conversation.user2_id == user.id
+            ).first()
+            if existing_conv:
+                return redirect(url_for('view_conversation', conversation_id=existing_conv.id))
+        flash('Conversation not found.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+    
+    # Check for existing conversation
+    existing_conv = Conversation.query.filter(
+        Conversation.order_id == order_id,
+        Conversation.conversation_type == conv_type,
+        Conversation.user1_id == user1_id,
+        Conversation.user2_id == user2_id
+    ).first()
+    
+    if existing_conv:
+        return redirect(url_for('view_conversation', conversation_id=existing_conv.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=user1_id,
+        user2_id=user2_id,
+        order_id=order.id,
+        conversation_type=conv_type
+    )
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With courier for order {order.order_number}')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
 @app.route('/messages/check-new/<int:conversation_id>')
 @login_required
 def check_new_messages(conversation_id):
