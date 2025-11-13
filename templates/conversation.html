@@ -272,18 +272,33 @@ function sendMessage(event) {
     
     fetch(`/conversation/${conversationId}/send`, {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
             // Add message to chat
             const chatMessages = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message message-own';
+            messageDiv.dataset.messageId = data.message_id || '';
+            
+            // Escape HTML to prevent XSS
+            const escapedText = document.createElement('div');
+            escapedText.textContent = data.message_text;
+            const safeText = escapedText.innerHTML;
+            
             messageDiv.innerHTML = `
                 <div class="message-bubble">
-                    <p class="mb-1">${data.message_text}</p>
+                    <p class="mb-1">${safeText}</p>
                     <small class="message-time">${data.created_at}</small>
                 </div>
             `;
@@ -303,48 +318,50 @@ function sendMessage(event) {
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('Failed to send message. Please try again.');
+        alert('Failed to send message. Please check your connection and try again.');
         messageInput.disabled = false;
     });
 }
 
 // Check for new messages periodically
-let lastMessageId = 0;
-const messageElements = document.querySelectorAll('[data-message-id]');
-if (messageElements.length > 0) {
-    lastMessageId = parseInt(messageElements[messageElements.length - 1].dataset.messageId);
-}
-
-setInterval(function() {
-    const conversationId = {{ conversation.id }};
+(function() {
+    let lastMessageId = 0;
+    const messageElements = document.querySelectorAll('[data-message-id]');
+    if (messageElements.length > 0) {
+        lastMessageId = parseInt(messageElements[messageElements.length - 1].dataset.messageId);
+    }
     
-    fetch(`/conversation/${conversationId}/check_new?last_id=${lastMessageId}`)
-    .then(response => response.json())
-    .then(data => {
-        if (data.success && data.messages && data.messages.length > 0) {
-            const chatMessages = document.getElementById('chatMessages');
-            data.messages.forEach(message => {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message message-other';
-                messageDiv.dataset.messageId = message.id;
-                messageDiv.innerHTML = `
-                    <div class="message-bubble">
-                        <p class="mb-1">${message.message_text}</p>
-                        <small class="message-time">${message.created_at}</small>
-                    </div>
-                `;
-                chatMessages.appendChild(messageDiv);
-                lastMessageId = message.id;
-            });
-            
-            // Auto-scroll to new messages
-            scrollToBottom(true);
-        }
-    })
-    .catch(error => {
-        console.error('Error checking for new messages:', error);
-    });
-}, 5000);
+    setInterval(function() {
+        const conversationId = {{ conversation.id }};
+        
+        fetch(`/conversation/${conversationId}/check_new?last_id=${lastMessageId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.messages && data.messages.length > 0) {
+                const chatMessages = document.getElementById('chatMessages');
+                data.messages.forEach(message => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message message-other';
+                    messageDiv.dataset.messageId = message.id;
+                    messageDiv.innerHTML = `
+                        <div class="message-bubble">
+                            <p class="mb-1">${message.message_text}</p>
+                            <small class="message-time">${message.created_at}</small>
+                        </div>
+                    `;
+                    chatMessages.appendChild(messageDiv);
+                    lastMessageId = message.id;
+                });
+                
+                // Auto-scroll to new messages
+                scrollToBottom(true);
+            }
+        })
+        .catch(error => {
+            console.error('Error checking for new messages:', error);
+        });
+    }, 5000);
+})();
 </script>
 
 
