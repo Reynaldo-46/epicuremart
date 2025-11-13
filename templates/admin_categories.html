@@ -27,13 +27,86 @@
                             <p class="card-text text-muted">{{ category.description }}</p>
                             <small class="text-muted">ID: {{ category.id }}</small>
                         </div>
-                        <form method="POST" action="{{ url_for('delete_category', category_id=category.id) }}" 
-                              onsubmit="return confirm('Delete this category? Products in this category will also be affected.');">
-                            <button type="submit" class="btn btn-sm btn-outline-danger">
-                                <i class="fas fa-trash"></i>
+                        <div class="d-flex flex-column gap-2">
+                            <button class="btn btn-sm btn-outline-primary" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#editCategoryModal{{ category.id }}"
+                                    title="Edit category">
+                                <i class="fas fa-edit"></i>
                             </button>
-                        </form>
+                            <form method="POST" action="{{ url_for('delete_category', category_id=category.id) }}" 
+                                  onsubmit="return confirm('Delete this category? Products in this category will also be affected.');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete category">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                        </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit Category Modal for {{ category.name }} -->
+        <div class="modal fade" id="editCategoryModal{{ category.id }}" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Category: {{ category.name }}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form method="POST" action="{{ url_for('update_category', category_id=category.id) }}" enctype="multipart/form-data">
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Name</label>
+                                <input type="text" name="name" class="form-control" value="{{ category.name }}" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Description</label>
+                                <textarea name="description" class="form-control" rows="2">{{ category.description }}</textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Background Image</label>
+                                {% if category.background_image %}
+                                <div class="mb-2">
+                                    <img src="{{ url_for('static', filename='uploads/' + category.background_image) }}" 
+                                         alt="Current background" 
+                                         style="max-width: 200px; height: auto; border-radius: 4px;">
+                                    <p class="text-muted small">Current background image</p>
+                                </div>
+                                {% endif %}
+                                <input type="file" name="background_image" class="form-control" accept="image/*">
+                                <small class="form-text text-muted">Upload a new background image to replace the current one (PNG, JPG, JPEG, GIF, WEBP)</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Icon</label>
+                                <input type="text" name="icon" id="iconInputEdit{{ category.id }}" class="form-control" value="{{ category.icon }}" readonly>
+                                <small class="form-text text-muted">Click an icon below to change</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Select Icon</label>
+                                <div class="icon-grid-edit" data-category-id="{{ category.id }}" style="max-height: 300px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 4px; padding: 10px;">
+                                    <div class="row g-2">
+                                        {% for icon in category_icons %}
+                                        <div class="col-2 col-md-1">
+                                            <button type="button" 
+                                                    class="btn btn-outline-secondary w-100 icon-selector-edit" 
+                                                    data-icon="{{ icon }}"
+                                                    data-category-id="{{ category.id }}"
+                                                    {% if icon == category.icon %}data-current="true"{% endif %}
+                                                    style="font-size: 1.5rem; padding: 0.5rem;">
+                                                {{ icon }}
+                                            </button>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Update Category</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -98,7 +171,7 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Icon selector functionality
+    // Icon selector functionality for Add modal
     const iconButtons = document.querySelectorAll('.icon-selector');
     const iconInput = document.getElementById('iconInput');
     
@@ -114,16 +187,44 @@ document.addEventListener('DOMContentLoaded', function() {
             this.classList.add('active');
         });
     });
+
+    // Icon selector functionality for Edit modals
+    const iconButtonsEdit = document.querySelectorAll('.icon-selector-edit');
+    
+    iconButtonsEdit.forEach(button => {
+        const categoryId = button.getAttribute('data-category-id');
+        const iconInputEdit = document.getElementById('iconInputEdit' + categoryId);
+        
+        // Highlight current icon on modal open
+        if (button.getAttribute('data-current') === 'true') {
+            button.classList.add('active');
+        }
+        
+        button.addEventListener('click', function() {
+            const icon = this.getAttribute('data-icon');
+            iconInputEdit.value = icon;
+            
+            // Remove active class from all buttons in this edit modal
+            document.querySelectorAll('.icon-selector-edit[data-category-id="' + categoryId + '"]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Add active class to clicked button
+            this.classList.add('active');
+        });
+    });
 });
 </script>
 
 <style>
-.icon-selector.active {
+.icon-selector.active,
+.icon-selector-edit.active {
     background-color: #0d6efd;
     color: white;
     border-color: #0d6efd;
 }
-.icon-selector:hover {
+.icon-selector:hover,
+.icon-selector-edit:hover {
     background-color: #e9ecef;
 }
 </style>

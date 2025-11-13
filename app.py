@@ -2601,6 +2601,49 @@ def admin_categories():
     return render_template('admin_categories.html', categories=categories, category_icons=CATEGORY_ICONS)
 
 
+@app.route('/admin/category/<int:category_id>/update', methods=['POST'])
+@login_required
+@role_required('admin')
+def update_category(category_id):
+    category = Category.query.get_or_404(category_id)
+    
+    # Get form data
+    name = request.form.get('name')
+    description = request.form.get('description')
+    icon = request.form.get('icon')
+    
+    # Handle background image upload
+    if 'background_image' in request.files:
+        file = request.files['background_image']
+        if file and file.filename and allowed_file(file.filename):
+            # Delete old background image if exists
+            if category.background_image:
+                old_file_path = os.path.join(app.config['UPLOAD_FOLDER'], category.background_image)
+                try:
+                    if os.path.exists(old_file_path):
+                        os.remove(old_file_path)
+                except Exception as e:
+                    print(f"Error deleting old background image: {e}")
+            
+            # Save new background image
+            filename = secure_filename(file.filename)
+            unique_filename = f"category_bg_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            file.save(filepath)
+            category.background_image = unique_filename
+    
+    # Update category fields
+    category.name = name
+    category.description = description
+    category.icon = icon
+    
+    db.session.commit()
+    
+    log_action('CATEGORY_UPDATED', 'Category', category.id, f'Updated: {name}')
+    flash('Category updated successfully!', 'success')
+    return redirect(url_for('admin_categories'))
+
+
 @app.route('/admin/category/<int:category_id>/delete', methods=['POST'])
 @login_required
 @role_required('admin')
