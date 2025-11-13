@@ -7,11 +7,20 @@
     .chat-container {
         max-width: 900px;
         margin: 2rem auto;
+        height: calc(100vh - 150px);
     }
     
     @media (max-width: 768px) {
         .chat-container {
             margin: 1rem;
+            height: calc(100vh - 120px);
+        }
+    }
+    
+    @media (max-width: 576px) {
+        .chat-container {
+            margin: 0.5rem;
+            height: calc(100vh - 100px);
         }
     }
     
@@ -20,12 +29,22 @@
         overflow: hidden;
         box-shadow: 0 8px 24px rgba(0,0,0,0.12);
         border: none;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
     }
     
     .chat-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 1.5rem;
         border: none;
+        flex-shrink: 0;
+    }
+    
+    @media (max-width: 576px) {
+        .chat-header {
+            padding: 1rem;
+        }
     }
     
     .user-info {
@@ -70,28 +89,26 @@
     }
     
     .chat-messages {
-        height: 550px;
-        max-height: calc(100vh - 300px);
+        flex: 1 1 auto;
         overflow-y: auto;
         overflow-x: hidden;
         padding: 1.5rem;
         background: #f8f9fa;
         scroll-behavior: smooth;
         -webkit-overflow-scrolling: touch;
+        min-height: 0;
+        position: relative;
     }
     
     @media (max-width: 768px) {
         .chat-messages {
-            height: calc(100vh - 280px);
-            max-height: calc(100vh - 280px);
             padding: 1rem;
         }
     }
     
     @media (max-width: 576px) {
         .chat-messages {
-            height: calc(100vh - 260px);
-            max-height: calc(100vh - 260px);
+            padding: 0.75rem;
         }
     }
     
@@ -204,6 +221,13 @@
         padding: 1.25rem;
         background: white;
         border-top: 1px solid #e5e7eb;
+        flex-shrink: 0;
+    }
+    
+    @media (max-width: 576px) {
+        .chat-input-area {
+            padding: 0.75rem;
+        }
     }
     
     .input-wrapper {
@@ -407,11 +431,11 @@ function scrollToBottom(smooth = true) {
 }
 
 // Scroll to bottom on page load (immediate)
-scrollToBottom(false);
+setTimeout(() => scrollToBottom(false), 100);
 
 // Scroll after images load
 window.addEventListener('load', function() {
-    scrollToBottom(false);
+    setTimeout(() => scrollToBottom(false), 100);
 });
 
 // Handle form submission

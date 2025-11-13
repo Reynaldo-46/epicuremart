@@ -79,16 +79,23 @@
         border-radius: 16px;
         overflow: hidden;
         box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-        height: 600px;
-        max-height: calc(100vh - 120px);
         display: flex;
         flex-direction: column;
+        height: calc(100vh - 140px);
+        max-height: calc(100vh - 140px);
+    }
+    
+    @media (max-width: 768px) {
+        .chat-container {
+            height: calc(100vh - 120px);
+            max-height: calc(100vh - 120px);
+        }
     }
     
     @media (max-width: 576px) {
         .chat-container {
-            height: calc(100vh - 100px);
-            max-height: calc(100vh - 100px);
+            height: calc(100vh - 90px);
+            max-height: calc(100vh - 90px);
             border-radius: 12px;
         }
     }
@@ -98,6 +105,13 @@
         color: white;
         padding: 1.25rem;
         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        flex-shrink: 0;
+    }
+    
+    @media (max-width: 576px) {
+        .chat-header {
+            padding: 1rem;
+        }
     }
     
     .avatar-circle {
@@ -111,13 +125,15 @@
     }
     
     .chat-messages {
-        flex: 1;
+        flex: 1 1 auto;
         overflow-y: auto;
         overflow-x: hidden;
         padding: 1.5rem;
         background: #f8fafc;
         scroll-behavior: smooth;
         -webkit-overflow-scrolling: touch;
+        min-height: 0;
+        position: relative;
     }
     
     .chat-messages::-webkit-scrollbar {
@@ -181,6 +197,13 @@
         padding: 1rem;
         background: white;
         border-top: 1px solid #e2e8f0;
+        flex-shrink: 0;
+    }
+    
+    @media (max-width: 576px) {
+        .chat-input-area {
+            padding: 0.75rem;
+        }
     }
     
     .chat-input-area .form-control {
@@ -223,7 +246,12 @@ function scrollToBottom(smooth = false) {
 
 // Scroll to bottom on page load
 document.addEventListener('DOMContentLoaded', function() {
-    scrollToBottom(false);
+    setTimeout(() => scrollToBottom(false), 100);
+});
+
+// Also scroll after all images and content loaded
+window.addEventListener('load', function() {
+    setTimeout(() => scrollToBottom(false), 100);
 });
 
 // Auto-scroll when new message is sent
