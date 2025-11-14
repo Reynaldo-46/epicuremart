@@ -134,21 +134,16 @@
         
         <!-- Categories with Real Images -->
         <div class="categories-image-grid">
-            {% set category_images = {
-                'Fruits & Vegetables': 'https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=600&q=80',
-                'Meat & Seafood': 'https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?w=600&q=80',
-                'Dairy & Eggs': 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=600&q=80',
-                'Bakery & Bread': 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&q=80',
-                'Beverages': 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=600&q=80',
-                'Snacks & Sweets': 'https://images.unsplash.com/photo-1579954115545-a95591f28bfc?w=600&q=80'
-            } %}
-            
             {% for category in categories %}
             <a href="{{ url_for('browse', category=category.id) }}" class="text-decoration-none category-image-link">
                 <div class="category-image-card">
                     <div class="category-image-wrapper">
                         {% set category_base_name = category.name.split('&')[0].strip() %}
-                        <div class="category-bg-image" style="background-image: url('{{ category_images.get(category_base_name, "https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&q=80") }}');"></div>
+                        {% if category.background_image %}
+                        <div class="category-bg-image" style="background-image: url('{{ url_for('static', filename='uploads/' + category.background_image) }}');"></div>
+                        {% else %}
+                        <div class="category-bg-image" style="background-image: url('https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&q=80');"></div>
+                        {% endif %}
                         <div class="category-image-overlay"></div>
                         <div class="category-content">
                             <div class="category-emoji">{{ category.icon }}</div>
