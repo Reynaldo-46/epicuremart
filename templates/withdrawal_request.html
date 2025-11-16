@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .withdrawal-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 3rem 0;
+    }
+    
+    .withdrawal-card {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+        overflow: hidden;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    
+    .withdrawal-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2.5rem;
+        text-align: center;
+    }
+    
+    .withdrawal-header h2 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    
+    .withdrawal-header p {
+        margin: 0.5rem 0 0 0;
+        opacity: 0.95;
+    }
+    
+    .balance-info {
+        background: linear-gradient(135deg, #00c9a7 0%, #00b894 100%);
+        color: white;
+        padding: 2rem;
+        margin: -1.5rem 1.5rem 1.5rem 1.5rem;
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0,201,167,0.3);
+    }
+    
+    .balance-amount {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    
+    .balance-label {
+        font-size: 0.95rem;
+        opacity: 0.9;
+        margin-top: 0.25rem;
+    }
+    
+    .withdrawal-body {
+        padding: 2rem 2.5rem;
+    }
+    
+    .form-group label {
+        font-weight: 600;
+        color: #2c3e50;
+        margin-bottom: 0.5rem;
+        display: block;
+    }
+    
+    .form-control, .form-select {
+        border: 2px solid #e0e6ed;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+    }
+    
+    .form-control:focus, .form-select:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+    }
+    
+    .payout-methods {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .payout-method {
+        position: relative;
+    }
+    
+    .payout-method input[type="radio"] {
+        position: absolute;
+        opacity: 0;
+    }
+    
+    .payout-method label {
+        display: block;
+        padding: 1.25rem;
+        border: 2px solid #e0e6ed;
+        border-radius: 12px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        background: white;
+    }
+    
+    .payout-method input[type="radio"]:checked + label {
+        border-color: #667eea;
+        background: linear-gradient(135deg, rgba(102,126,234,0.1) 0%, rgba(118,75,162,0.1) 100%);
+        box-shadow: 0 5px 20px rgba(102,126,234,0.2);
+    }
+    
+    .payout-method label i {
+        font-size: 2rem;
+        display: block;
+        margin-bottom: 0.5rem;
+        color: #667eea;
+    }
+    
+    .payout-method label span {
+        display: block;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    
+    .info-alert {
+        background: #f8f9fa;
+        border-left: 4px solid #667eea;
+        padding: 1rem 1.25rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+    }
+    
+    .info-alert h6 {
+        color: #667eea;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    
+    .info-alert ul {
+        margin: 0;
+        padding-left: 1.25rem;
+    }
+    
+    .info-alert li {
+        color: #6c757d;
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .btn-withdraw {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 1rem 2.5rem;
+        border-radius: 10px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        width: 100%;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-withdraw:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 30px rgba(102,126,234,0.3);
+    }
+    
+    .btn-cancel {
+        background: #6c757d;
+        color: white;
+        border: none;
+        padding: 1rem 2.5rem;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+        width: 100%;
+        margin-top: 1rem;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-cancel:hover {
+        background: #5a6268;
+        color: white;
+    }
+    
+    @media (max-width: 768px) {
+        .withdrawal-container {
+            padding: 1rem;
+        }
+        
+        .balance-amount {
+            font-size: 2rem;
+        }
+        
+        .payout-methods {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+</style>
+
+<div class="withdrawal-container">
+    <div class="container">
+        <div class="withdrawal-card">
+            <div class="withdrawal-header">
+                <h2><i class="fas fa-money-bill-wave"></i> Request Withdrawal</h2>
+                <p>Withdraw your earnings securely</p>
+            </div>
+            
+            <div class="balance-info">
+                <div class="text-center">
+                    <h3 class="balance-amount">₱{{ "%.2f"|format(available_balance) }}</h3>
+                    <p class="balance-label">Available Balance</p>
+                </div>
+            </div>
+            
+            <div class="withdrawal-body">
+                {% if available_balance < 100 %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> 
+                    <strong>Insufficient Balance:</strong> You need at least ₱100.00 to request a withdrawal. 
+                    Current balance: ₱{{ "%.2f"|format(available_balance) }}
+                </div>
+                {% endif %}
+                
+                <form method="POST" action="{{ url_for('withdrawal_request') }}">
+                    <!-- Amount -->
+                    <div class="form-group mb-4">
+                        <label for="amount">
+                            <i class="fas fa-coins"></i> Withdrawal Amount
+                        </label>
+                        <div class="input-group">
+                            <span class="input-group-text" style="border-radius: 10px 0 0 10px; border: 2px solid #e0e6ed; border-right: none;">₱</span>
+                            <input type="number" 
+                                   class="form-control" 
+                                   id="amount" 
+                                   name="amount" 
+                                   min="100" 
+                                   max="{{ available_balance }}" 
+                                   step="0.01" 
+                                   required 
+                                   placeholder="Enter amount"
+                                   style="border-left: none;">
+                        </div>
+                        <small class="text-muted">Minimum withdrawal: ₱100.00</small>
+                    </div>
+                    
+                    <!-- Payout Method -->
+                    <div class="form-group mb-4">
+                        <label><i class="fas fa-wallet"></i> Payout Method</label>
+                        <div class="payout-methods">
+                            <div class="payout-method">
+                                <input type="radio" id="bank_transfer" name="payout_method" value="bank_transfer" required>
+                                <label for="bank_transfer">
+                                    <i class="fas fa-university"></i>
+                                    <span>Bank Transfer</span>
+                                </label>
+                            </div>
+                            <div class="payout-method">
+                                <input type="radio" id="gcash" name="payout_method" value="gcash" required>
+                                <label for="gcash">
+                                    <i class="fas fa-mobile-alt"></i>
+                                    <span>GCash</span>
+                                </label>
+                            </div>
+                            <div class="payout-method">
+                                <input type="radio" id="paymaya" name="payout_method" value="paymaya" required>
+                                <label for="paymaya">
+                                    <i class="fas fa-mobile-alt"></i>
+                                    <span>PayMaya</span>
+                                </label>
+                            </div>
+                            <div class="payout-method">
+                                <input type="radio" id="paypal" name="payout_method" value="paypal" required>
+                                <label for="paypal">
+                                    <i class="fab fa-paypal"></i>
+                                    <span>PayPal</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Account Name -->
+                    <div class="form-group mb-4">
+                        <label for="account_name">
+                            <i class="fas fa-user"></i> Account Name
+                        </label>
+                        <input type="text" 
+                               class="form-control" 
+                               id="account_name" 
+                               name="account_name" 
+                               required 
+                               placeholder="Enter account holder name"
+                               minlength="3">
+                    </div>
+                    
+                    <!-- Account Number -->
+                    <div class="form-group mb-4">
+                        <label for="account_number">
+                            <i class="fas fa-hashtag"></i> Account Number / Mobile Number
+                        </label>
+                        <input type="text" 
+                               class="form-control" 
+                               id="account_number" 
+                               name="account_number" 
+                               required 
+                               placeholder="Enter account or mobile number"
+                               minlength="5">
+                    </div>
+                    
+                    <!-- Notes (Optional) -->
+                    <div class="form-group mb-4">
+                        <label for="notes">
+                            <i class="fas fa-sticky-note"></i> Additional Notes (Optional)
+                        </label>
+                        <textarea class="form-control" 
+                                  id="notes" 
+                                  name="notes" 
+                                  rows="3" 
+                                  placeholder="Any special instructions or notes"></textarea>
+                    </div>
+                    
+                    <!-- Important Information -->
+                    <div class="info-alert">
+                        <h6><i class="fas fa-info-circle"></i> Important Information</h6>
+                        <ul>
+                            <li>Withdrawals are processed within 1-3 business days</li>
+                            <li>Please ensure your account details are correct</li>
+                            <li>You will receive a confirmation email once processed</li>
+                            <li>Minimum withdrawal amount is ₱100.00</li>
+                        </ul>
+                    </div>
+                    
+                    <!-- Submit Button -->
+                    <button type="submit" class="btn btn-withdraw" {% if available_balance < 100 %}disabled{% endif %}>
+                        <i class="fas fa-paper-plane"></i> Submit Withdrawal Request
+                    </button>
+                    
+                    <a href="{{ url_for('withdrawal_history') }}" class="btn btn-cancel">
+                        <i class="fas fa-arrow-left"></i> View Withdrawal History
+                    </a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,482 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .admin-withdrawals-container {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        min-height: 100vh;
+        padding: 2rem 0;
+    }
+    
+    .admin-header {
+        background: white;
+        border-radius: 20px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1.5rem;
+    }
+    
+    .stat-card {
+        background: white;
+        border-radius: 15px;
+        padding: 1.5rem;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.06);
+        text-align: center;
+        transition: transform 0.3s ease;
+        border-left: 4px solid;
+    }
+    
+    .stat-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .stat-card.pending {
+        border-color: #ffc107;
+    }
+    
+    .stat-card.processing {
+        border-color: #0dcaf0;
+    }
+    
+    .stat-card.completed {
+        border-color: #198754;
+    }
+    
+    .stat-card.total {
+        border-color: #6f42c1;
+    }
+    
+    .stat-icon {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .stat-icon.pending { color: #ffc107; }
+    .stat-icon.processing { color: #0dcaf0; }
+    .stat-icon.completed { color: #198754; }
+    .stat-icon.total { color: #6f42c1; }
+    
+    .stat-amount {
+        font-size: 1.75rem;
+        font-weight: 700;
+        margin: 0;
+        color: #2c3e50;
+    }
+    
+    .stat-label {
+        font-size: 0.9rem;
+        color: #6c757d;
+        margin-top: 0.25rem;
+    }
+    
+    .filter-tabs {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 1.5rem;
+    }
+    
+    .filter-btn {
+        padding: 0.6rem 1.5rem;
+        border: 2px solid #e0e6ed;
+        background: white;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        color: #495057;
+        font-weight: 500;
+    }
+    
+    .filter-btn:hover {
+        border-color: #667eea;
+        background: #f8f9fa;
+        color: #667eea;
+    }
+    
+    .filter-btn.active {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-color: #667eea;
+    }
+    
+    .withdrawals-table-card {
+        background: white;
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    }
+    
+    .status-badge {
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .status-pending {
+        background: #fff3cd;
+        color: #856404;
+    }
+    
+    .status-processing {
+        background: #cfe2ff;
+        color: #084298;
+    }
+    
+    .status-completed {
+        background: #d1e7dd;
+        color: #0f5132;
+    }
+    
+    .status-rejected {
+        background: #f8d7da;
+        color: #842029;
+    }
+    
+    .withdrawals-table {
+        width: 100%;
+        margin-top: 1.5rem;
+    }
+    
+    .withdrawals-table th {
+        background: #f8f9fa;
+        color: #495057;
+        font-weight: 600;
+        padding: 1rem;
+        border-bottom: 2px solid #dee2e6;
+    }
+    
+    .withdrawals-table td {
+        padding: 1rem;
+        border-bottom: 1px solid #dee2e6;
+        vertical-align: middle;
+    }
+    
+    .withdrawals-table tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .btn-update {
+        padding: 0.4rem 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-approve {
+        background: #198754;
+        color: white;
+    }
+    
+    .btn-approve:hover {
+        background: #157347;
+    }
+    
+    .btn-reject {
+        background: #dc3545;
+        color: white;
+    }
+    
+    .btn-reject:hover {
+        background: #bb2d3b;
+    }
+    
+    .modal-content {
+        border-radius: 15px;
+        border: none;
+    }
+    
+    .modal-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 15px 15px 0 0;
+    }
+    
+    .user-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.8rem;
+        background: #e7e9fc;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        color: #667eea;
+        font-weight: 600;
+    }
+    
+    .user-badge.seller { background: #fff3cd; color: #856404; }
+    .user-badge.courier { background: #cfe2ff; color: #084298; }
+    .user-badge.rider { background: #d1ecf1; color: #0c5460; }
+    .user-badge.admin { background: #f8d7da; color: #721c24; }
+    
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: #6c757d;
+    }
+    
+    .empty-state i {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.3;
+    }
+    
+    @media (max-width: 768px) {
+        .admin-withdrawals-container {
+            padding: 1rem;
+        }
+        
+        .withdrawals-table {
+            display: block;
+            overflow-x: auto;
+        }
+    }
+</style>
+
+<div class="admin-withdrawals-container">
+    <div class="container">
+        <div class="admin-header">
+            <h2><i class="fas fa-money-check-alt"></i> Withdrawal Management</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-card pending">
+                    <div class="stat-icon pending"><i class="fas fa-clock"></i></div>
+                    <h3 class="stat-amount">{{ total_pending }}</h3>
+                    <p class="stat-label">Pending Requests</p>
+                </div>
+                
+                <div class="stat-card processing">
+                    <div class="stat-icon processing"><i class="fas fa-spinner"></i></div>
+                    <h3 class="stat-amount">{{ total_processing }}</h3>
+                    <p class="stat-label">Processing</p>
+                </div>
+                
+                <div class="stat-card completed">
+                    <div class="stat-icon completed"><i class="fas fa-check-circle"></i></div>
+                    <h3 class="stat-amount">{{ total_completed }}</h3>
+                    <p class="stat-label">Completed</p>
+                </div>
+                
+                <div class="stat-card total">
+                    <div class="stat-icon total"><i class="fas fa-coins"></i></div>
+                    <h3 class="stat-amount">₱{{ "%.2f"|format(pending_amount) }}</h3>
+                    <p class="stat-label">Pending Amount</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="withdrawals-table-card">
+            <div class="filter-tabs">
+                <a href="{{ url_for('admin_withdrawals', status='all') }}" 
+                   class="filter-btn {% if status_filter == 'all' %}active{% endif %}">
+                    <i class="fas fa-list"></i> All
+                </a>
+                <a href="{{ url_for('admin_withdrawals', status='pending') }}" 
+                   class="filter-btn {% if status_filter == 'pending' %}active{% endif %}">
+                    <i class="fas fa-clock"></i> Pending
+                </a>
+                <a href="{{ url_for('admin_withdrawals', status='processing') }}" 
+                   class="filter-btn {% if status_filter == 'processing' %}active{% endif %}">
+                    <i class="fas fa-spinner"></i> Processing
+                </a>
+                <a href="{{ url_for('admin_withdrawals', status='completed') }}" 
+                   class="filter-btn {% if status_filter == 'completed' %}active{% endif %}">
+                    <i class="fas fa-check-circle"></i> Completed
+                </a>
+                <a href="{{ url_for('admin_withdrawals', status='rejected') }}" 
+                   class="filter-btn {% if status_filter == 'rejected' %}active{% endif %}">
+                    <i class="fas fa-times-circle"></i> Rejected
+                </a>
+            </div>
+            
+            {% if withdrawals %}
+            <div class="table-responsive">
+                <table class="withdrawals-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Date</th>
+                            <th>Amount</th>
+                            <th>Payout Method</th>
+                            <th>Account Details</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for withdrawal in withdrawals %}
+                        <tr>
+                            <td><strong>#{{ withdrawal.id }}</strong></td>
+                            <td>
+                                <div>
+                                    <strong>{{ withdrawal.user.full_name or withdrawal.user.email }}</strong>
+                                    <br>
+                                    <span class="user-badge {{ withdrawal.user.role }}">
+                                        <i class="fas fa-user"></i> {{ withdrawal.user.role|title }}
+                                    </span>
+                                </div>
+                            </td>
+                            <td>
+                                <div>
+                                    {{ withdrawal.created_at.strftime('%b %d, %Y') }}
+                                    <br>
+                                    <small class="text-muted">{{ withdrawal.created_at.strftime('%I:%M %p') }}</small>
+                                </div>
+                            </td>
+                            <td>
+                                <strong style="font-size: 1.1rem; color: #667eea;">₱{{ "%.2f"|format(withdrawal.amount) }}</strong>
+                            </td>
+                            <td>
+                                {% if withdrawal.payout_method == 'bank_transfer' %}
+                                    <i class="fas fa-university"></i> Bank Transfer
+                                {% elif withdrawal.payout_method == 'gcash' %}
+                                    <i class="fas fa-mobile-alt"></i> GCash
+                                {% elif withdrawal.payout_method == 'paymaya' %}
+                                    <i class="fas fa-mobile-alt"></i> PayMaya
+                                {% elif withdrawal.payout_method == 'paypal' %}
+                                    <i class="fab fa-paypal"></i> PayPal
+                                {% else %}
+                                    {{ withdrawal.payout_method|title }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div>
+                                    <strong>{{ withdrawal.account_name }}</strong>
+                                    <br>
+                                    <small class="text-muted">{{ withdrawal.account_number }}</small>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="status-badge status-{{ withdrawal.status }}">
+                                    {% if withdrawal.status == 'pending' %}
+                                        Pending Review
+                                    {% elif withdrawal.status == 'processing' %}
+                                        Processing
+                                    {% elif withdrawal.status == 'completed' %}
+                                        Completed
+                                    {% elif withdrawal.status == 'rejected' %}
+                                        Rejected
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                {% if withdrawal.status == 'pending' %}
+                                <button class="btn btn-update btn-approve" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#updateModal{{ withdrawal.id }}"
+                                        data-action="processing">
+                                    <i class="fas fa-play"></i> Process
+                                </button>
+                                {% elif withdrawal.status == 'processing' %}
+                                <button class="btn btn-update btn-approve" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#updateModal{{ withdrawal.id }}"
+                                        data-action="completed">
+                                    <i class="fas fa-check"></i> Complete
+                                </button>
+                                {% else %}
+                                <small class="text-muted">No actions</small>
+                                {% endif %}
+                                
+                                {% if withdrawal.status in ['pending', 'processing'] %}
+                                <button class="btn btn-update btn-reject" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#rejectModal{{ withdrawal.id }}">
+                                    <i class="fas fa-times"></i> Reject
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        
+                        <!-- Update Modal -->
+                        <div class="modal fade" id="updateModal{{ withdrawal.id }}" tabindex="-1">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Update Withdrawal Status</h5>
+                                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <form method="POST" action="{{ url_for('admin_update_withdrawal', withdrawal_id=withdrawal.id) }}">
+                                        <div class="modal-body">
+                                            <p>Update withdrawal request #{{ withdrawal.id }} for <strong>{{ withdrawal.user.full_name or withdrawal.user.email }}</strong>?</p>
+                                            <p><strong>Amount:</strong> ₱{{ "%.2f"|format(withdrawal.amount) }}</p>
+                                            
+                                            <div class="form-group">
+                                                <label>New Status:</label>
+                                                <select name="status" class="form-select" required>
+                                                    {% if withdrawal.status == 'pending' %}
+                                                    <option value="processing">Processing</option>
+                                                    {% elif withdrawal.status == 'processing' %}
+                                                    <option value="completed">Completed</option>
+                                                    {% endif %}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                            <button type="submit" class="btn btn-primary">Update Status</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Reject Modal -->
+                        <div class="modal fade" id="rejectModal{{ withdrawal.id }}" tabindex="-1">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header bg-danger">
+                                        <h5 class="modal-title">Reject Withdrawal Request</h5>
+                                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <form method="POST" action="{{ url_for('admin_update_withdrawal', withdrawal_id=withdrawal.id) }}">
+                                        <input type="hidden" name="status" value="rejected">
+                                        <div class="modal-body">
+                                            <p>Reject withdrawal request #{{ withdrawal.id }}?</p>
+                                            
+                                            <div class="form-group">
+                                                <label>Rejection Reason:</label>
+                                                <textarea name="rejection_reason" 
+                                                          class="form-control" 
+                                                          rows="3" 
+                                                          required 
+                                                          placeholder="Provide a reason for rejection"></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                            <button type="submit" class="btn btn-danger">Reject Request</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <h4>No Withdrawal Requests</h4>
+                <p>No withdrawal requests found with the selected filter.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

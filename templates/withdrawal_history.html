@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .history-container {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        min-height: 100vh;
+        padding: 2rem 0;
+    }
+    
+    .history-header {
+        background: white;
+        border-radius: 20px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1.5rem;
+    }
+    
+    .stat-card {
+        background: white;
+        border-radius: 15px;
+        padding: 1.5rem;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.06);
+        text-align: center;
+        transition: transform 0.3s ease;
+    }
+    
+    .stat-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .stat-card.available {
+        background: linear-gradient(135deg, #00c9a7 0%, #00b894 100%);
+        color: white;
+    }
+    
+    .stat-card.withdrawn {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    .stat-card.pending {
+        background: linear-gradient(135deg, #ff9f43 0%, #ee5a6f 100%);
+        color: white;
+    }
+    
+    .stat-icon {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+        opacity: 0.9;
+    }
+    
+    .stat-amount {
+        font-size: 2rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    
+    .stat-label {
+        font-size: 0.9rem;
+        opacity: 0.9;
+        margin-top: 0.25rem;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+    
+    .btn-new-withdrawal {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 0.75rem 2rem;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-new-withdrawal:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 30px rgba(102,126,234,0.3);
+        color: white;
+    }
+    
+    .history-table-card {
+        background: white;
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    }
+    
+    .status-badge {
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .status-pending {
+        background: #fff3cd;
+        color: #856404;
+    }
+    
+    .status-processing {
+        background: #cfe2ff;
+        color: #084298;
+    }
+    
+    .status-completed {
+        background: #d1e7dd;
+        color: #0f5132;
+    }
+    
+    .status-rejected {
+        background: #f8d7da;
+        color: #842029;
+    }
+    
+    .withdrawal-table {
+        width: 100%;
+        margin-top: 1.5rem;
+    }
+    
+    .withdrawal-table th {
+        background: #f8f9fa;
+        color: #495057;
+        font-weight: 600;
+        padding: 1rem;
+        border-bottom: 2px solid #dee2e6;
+    }
+    
+    .withdrawal-table td {
+        padding: 1rem;
+        border-bottom: 1px solid #dee2e6;
+        vertical-align: middle;
+    }
+    
+    .withdrawal-table tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .payout-method-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.8rem;
+        background: #e7e9fc;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        color: #667eea;
+        font-weight: 600;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: #6c757d;
+    }
+    
+    .empty-state i {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.3;
+    }
+    
+    .empty-state h4 {
+        color: #495057;
+        margin-bottom: 0.5rem;
+    }
+    
+    @media (max-width: 768px) {
+        .history-container {
+            padding: 1rem;
+        }
+        
+        .withdrawal-table {
+            display: block;
+            overflow-x: auto;
+        }
+        
+        .action-buttons {
+            flex-direction: column;
+        }
+        
+        .btn-new-withdrawal {
+            width: 100%;
+        }
+    }
+</style>
+
+<div class="history-container">
+    <div class="container">
+        <div class="history-header">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2><i class="fas fa-history"></i> Withdrawal History</h2>
+                <div class="action-buttons">
+                    <a href="{{ url_for('withdrawal_request') }}" class="btn btn-new-withdrawal">
+                        <i class="fas fa-plus"></i> New Withdrawal
+                    </a>
+                </div>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card available">
+                    <div class="stat-icon"><i class="fas fa-wallet"></i></div>
+                    <h3 class="stat-amount">₱{{ "%.2f"|format(available_balance) }}</h3>
+                    <p class="stat-label">Available Balance</p>
+                </div>
+                
+                <div class="stat-card withdrawn">
+                    <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+                    <h3 class="stat-amount">₱{{ "%.2f"|format(total_withdrawn) }}</h3>
+                    <p class="stat-label">Total Withdrawn</p>
+                </div>
+                
+                <div class="stat-card pending">
+                    <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                    <h3 class="stat-amount">₱{{ "%.2f"|format(pending_amount) }}</h3>
+                    <p class="stat-label">Pending Amount</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="history-table-card">
+            <h4><i class="fas fa-list"></i> Transaction History</h4>
+            
+            {% if withdrawals %}
+            <div class="table-responsive">
+                <table class="withdrawal-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Amount</th>
+                            <th>Payout Method</th>
+                            <th>Account Details</th>
+                            <th>Status</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for withdrawal in withdrawals %}
+                        <tr>
+                            <td>
+                                <div>
+                                    <strong>{{ withdrawal.created_at.strftime('%b %d, %Y') }}</strong>
+                                    <br>
+                                    <small class="text-muted">{{ withdrawal.created_at.strftime('%I:%M %p') }}</small>
+                                </div>
+                            </td>
+                            <td>
+                                <strong style="font-size: 1.1rem; color: #667eea;">₱{{ "%.2f"|format(withdrawal.amount) }}</strong>
+                            </td>
+                            <td>
+                                <span class="payout-method-badge">
+                                    {% if withdrawal.payout_method == 'bank_transfer' %}
+                                        <i class="fas fa-university"></i> Bank Transfer
+                                    {% elif withdrawal.payout_method == 'gcash' %}
+                                        <i class="fas fa-mobile-alt"></i> GCash
+                                    {% elif withdrawal.payout_method == 'paymaya' %}
+                                        <i class="fas fa-mobile-alt"></i> PayMaya
+                                    {% elif withdrawal.payout_method == 'paypal' %}
+                                        <i class="fab fa-paypal"></i> PayPal
+                                    {% else %}
+                                        <i class="fas fa-wallet"></i> {{ withdrawal.payout_method|title }}
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                <div>
+                                    <strong>{{ withdrawal.account_name }}</strong>
+                                    <br>
+                                    <small class="text-muted">{{ withdrawal.account_number }}</small>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="status-badge status-{{ withdrawal.status }}">
+                                    {% if withdrawal.status == 'pending' %}
+                                        <i class="fas fa-clock"></i> Pending Review
+                                    {% elif withdrawal.status == 'processing' %}
+                                        <i class="fas fa-spinner"></i> Processing
+                                    {% elif withdrawal.status == 'completed' %}
+                                        <i class="fas fa-check-circle"></i> Completed
+                                    {% elif withdrawal.status == 'rejected' %}
+                                        <i class="fas fa-times-circle"></i> Rejected
+                                    {% endif %}
+                                </span>
+                                {% if withdrawal.status == 'completed' and withdrawal.processed_at %}
+                                    <br>
+                                    <small class="text-muted">{{ withdrawal.processed_at.strftime('%b %d, %Y') }}</small>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if withdrawal.notes %}
+                                    <small>{{ withdrawal.notes }}</small>
+                                {% elif withdrawal.status == 'rejected' and withdrawal.rejection_reason %}
+                                    <small class="text-danger">{{ withdrawal.rejection_reason }}</small>
+                                {% else %}
+                                    <small class="text-muted">-</small>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <h4>No Withdrawals Yet</h4>
+                <p>You haven't made any withdrawal requests. Click "New Withdrawal" to get started.</p>
+                <a href="{{ url_for('withdrawal_request') }}" class="btn btn-new-withdrawal mt-3">
+                    <i class="fas fa-plus"></i> Make Your First Withdrawal
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

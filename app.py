@@ -293,6 +293,27 @@ class Message(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
+
+
+class WithdrawalRequest(db.Model):
+    __tablename__ = 'withdrawal_requests'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    amount = db.Column(Numeric(10, 2), nullable=False)
+    payout_method = db.Column(db.String(50), nullable=False)  # e.g., 'bank_transfer', 'gcash', 'paymaya'
+    account_name = db.Column(db.String(100), nullable=False)
+    account_number = db.Column(db.String(100), nullable=False)
+    notes = db.Column(db.Text)
+    status = db.Column(db.Enum('pending', 'processing', 'completed', 'rejected'), default='pending')
+    rejection_reason = db.Column(db.Text)
+    processed_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    processed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id], backref='withdrawal_requests')
+    processor = db.relationship('User', foreign_keys=[processed_by])
     
 # ==================== HELPER FUNCTIONS ====================
 
@@ -3513,6 +3534,239 @@ def api_verify_qr():
         'status': order.status,
         'type': payload['type']
     })
+
+
+# ==================== WITHDRAWAL REQUEST ROUTES ====================
+
+@app.route('/withdrawal/request', methods=['GET', 'POST'])
+@login_required
+def withdrawal_request():
+    """Handle withdrawal request form for sellers, couriers, riders, and admins"""
+    from sqlalchemy import func
+    
+    user = User.query.get(session['user_id'])
+    
+    # Check if user is eligible for withdrawals
+    if user.role not in ['seller', 'courier', 'rider', 'admin']:
+        flash('You are not authorized to make withdrawal requests.', 'danger')
+        return redirect(url_for('index'))
+    
+    # Calculate available balance based on user role
+    available_balance = 0
+    if user.role == 'seller':
+        if not user.shop:
+            flash('You need to create a shop before requesting withdrawals.', 'warning')
+            return redirect(url_for('create_shop'))
+        # Sum of seller_amount from delivered orders minus pending/completed withdrawals
+        total_earnings = db.session.query(func.sum(Order.seller_amount))\
+            .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+        
+    elif user.role == 'courier':
+        # Sum of courier_earnings from delivered orders minus withdrawals
+        total_earnings = db.session.query(func.sum(Order.courier_earnings))\
+            .filter(Order.courier_id == user.id, Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+        
+    elif user.role == 'rider':
+        # Sum of rider_earnings from delivered orders minus withdrawals
+        total_earnings = db.session.query(func.sum(Order.rider_earnings))\
+            .filter(Order.rider_id == user.id, Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+        
+    elif user.role == 'admin':
+        # Admins can see total commission earnings
+        total_earnings = db.session.query(func.sum(Order.commission_amount))\
+            .filter(Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+    
+    if request.method == 'POST':
+        amount = request.form.get('amount', type=float)
+        payout_method = request.form.get('payout_method')
+        account_name = request.form.get('account_name')
+        account_number = request.form.get('account_number')
+        notes = request.form.get('notes', '')
+        
+        # Validation
+        errors = []
+        if not amount or amount <= 0:
+            errors.append('Please enter a valid amount.')
+        elif amount < 100:
+            errors.append('Minimum withdrawal amount is ₱100.00')
+        elif amount > available_balance:
+            errors.append(f'Insufficient balance. Available: ₱{available_balance:.2f}')
+        
+        if not payout_method:
+            errors.append('Please select a payout method.')
+        if not account_name or len(account_name.strip()) < 3:
+            errors.append('Please enter a valid account name.')
+        if not account_number or len(account_number.strip()) < 5:
+            errors.append('Please enter a valid account number.')
+        
+        if errors:
+            for error in errors:
+                flash(error, 'danger')
+        else:
+            # Create withdrawal request
+            withdrawal = WithdrawalRequest(
+                user_id=user.id,
+                amount=amount,
+                payout_method=payout_method,
+                account_name=account_name.strip(),
+                account_number=account_number.strip(),
+                notes=notes.strip() if notes else None,
+                status='pending'
+            )
+            db.session.add(withdrawal)
+            db.session.commit()
+            
+            flash(f'Withdrawal request for ₱{amount:.2f} submitted successfully! It will be processed within 1-3 business days.', 'success')
+            return redirect(url_for('withdrawal_history'))
+    
+    return render_template('withdrawal_request.html', 
+                         user=user, 
+                         available_balance=available_balance)
+
+
+@app.route('/withdrawal/history')
+@login_required
+def withdrawal_history():
+    """Display withdrawal history for the current user"""
+    from sqlalchemy import func
+    
+    user = User.query.get(session['user_id'])
+    
+    # Check if user is eligible for withdrawals
+    if user.role not in ['seller', 'courier', 'rider', 'admin']:
+        flash('You are not authorized to view withdrawal history.', 'danger')
+        return redirect(url_for('index'))
+    
+    # Get withdrawal requests
+    withdrawals = WithdrawalRequest.query.filter_by(user_id=user.id)\
+        .order_by(WithdrawalRequest.created_at.desc()).all()
+    
+    # Calculate statistics
+    total_withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+        .filter(WithdrawalRequest.user_id == user.id, 
+               WithdrawalRequest.status == 'completed').scalar() or 0
+    
+    pending_amount = db.session.query(func.sum(WithdrawalRequest.amount))\
+        .filter(WithdrawalRequest.user_id == user.id, 
+               WithdrawalRequest.status.in_(['pending', 'processing'])).scalar() or 0
+    
+    # Calculate available balance
+    available_balance = 0
+    if user.role == 'seller' and user.shop:
+        total_earnings = db.session.query(func.sum(Order.seller_amount))\
+            .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+    elif user.role == 'courier':
+        total_earnings = db.session.query(func.sum(Order.courier_earnings))\
+            .filter(Order.courier_id == user.id, Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+    elif user.role == 'rider':
+        total_earnings = db.session.query(func.sum(Order.rider_earnings))\
+            .filter(Order.rider_id == user.id, Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+    elif user.role == 'admin':
+        total_earnings = db.session.query(func.sum(Order.commission_amount))\
+            .filter(Order.status == 'DELIVERED').scalar() or 0
+        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
+            .filter(WithdrawalRequest.user_id == user.id, 
+                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
+        available_balance = float(total_earnings) - float(withdrawn)
+    
+    return render_template('withdrawal_history.html',
+                         user=user,
+                         withdrawals=withdrawals,
+                         total_withdrawn=float(total_withdrawn),
+                         pending_amount=float(pending_amount),
+                         available_balance=available_balance)
+
+
+@app.route('/admin/withdrawals')
+@login_required
+@role_required('admin')
+def admin_withdrawals():
+    """Admin view of all withdrawal requests"""
+    from sqlalchemy import func
+    
+    status_filter = request.args.get('status', 'all')
+    
+    # Build query
+    query = WithdrawalRequest.query
+    if status_filter != 'all':
+        query = query.filter_by(status=status_filter)
+    
+    withdrawals = query.order_by(WithdrawalRequest.created_at.desc()).all()
+    
+    # Statistics
+    total_pending = WithdrawalRequest.query.filter_by(status='pending').count()
+    total_processing = WithdrawalRequest.query.filter_by(status='processing').count()
+    total_completed = WithdrawalRequest.query.filter_by(status='completed').count()
+    
+    pending_amount = db.session.query(func.sum(WithdrawalRequest.amount))\
+        .filter(WithdrawalRequest.status == 'pending').scalar() or 0
+    
+    return render_template('admin_withdrawals.html',
+                         withdrawals=withdrawals,
+                         status_filter=status_filter,
+                         total_pending=total_pending,
+                         total_processing=total_processing,
+                         total_completed=total_completed,
+                         pending_amount=float(pending_amount))
+
+
+@app.route('/admin/withdrawals/<int:withdrawal_id>/update', methods=['POST'])
+@login_required
+@role_required('admin')
+def admin_update_withdrawal(withdrawal_id):
+    """Admin updates withdrawal status"""
+    withdrawal = WithdrawalRequest.query.get_or_404(withdrawal_id)
+    
+    new_status = request.form.get('status')
+    rejection_reason = request.form.get('rejection_reason', '')
+    
+    if new_status not in ['pending', 'processing', 'completed', 'rejected']:
+        flash('Invalid status.', 'danger')
+        return redirect(url_for('admin_withdrawals'))
+    
+    old_status = withdrawal.status
+    withdrawal.status = new_status
+    withdrawal.processed_by = session['user_id']
+    withdrawal.processed_at = datetime.utcnow()
+    
+    if new_status == 'rejected' and rejection_reason:
+        withdrawal.rejection_reason = rejection_reason
+    
+    db.session.commit()
+    
+    log_action('WITHDRAWAL_STATUS_UPDATED', 'WithdrawalRequest', withdrawal_id,
+              f'Status: {old_status} → {new_status}')
+    
+    flash(f'Withdrawal request #{withdrawal_id} updated to {new_status}.', 'success')
+    return redirect(url_for('admin_withdrawals'))
 
 
 # ==================== INITIALIZE DATABASE ====================
