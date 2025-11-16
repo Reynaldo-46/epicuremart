@@ -3620,6 +3620,9 @@ def withdrawal_request():
                 flash(error, 'danger')
         else:
             # Create withdrawal request
+            # Admin withdrawals are automatically completed, others are pending
+            withdrawal_status = 'completed' if user.role == 'admin' else 'pending'
+            
             withdrawal = WithdrawalRequest(
                 user_id=user.id,
                 amount=amount,
@@ -3627,12 +3630,23 @@ def withdrawal_request():
                 account_name=account_name.strip(),
                 account_number=account_number.strip(),
                 notes=notes.strip() if notes else None,
-                status='pending'
+                status=withdrawal_status
             )
+            
+            # If admin, set processed_by and processed_at automatically
+            if user.role == 'admin':
+                withdrawal.processed_by = user.id
+                withdrawal.processed_at = datetime.utcnow()
+            
             db.session.add(withdrawal)
             db.session.commit()
             
-            flash(f'Withdrawal request for ₱{amount:.2f} submitted successfully! It will be processed within 1-3 business days.', 'success')
+            # Different messages for admin vs other roles
+            if user.role == 'admin':
+                flash(f'Withdrawal request for ₱{amount:.2f} completed successfully! Your commission has been processed.', 'success')
+            else:
+                flash(f'Withdrawal request for ₱{amount:.2f} submitted successfully! It will be processed within 1-3 business days.', 'success')
+            
             return redirect(url_for('withdrawal_history'))
     
     return render_template('withdrawal_request.html', 
