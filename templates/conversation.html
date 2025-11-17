@@ -43,8 +43,38 @@
                         <div class="message {% if message.sender_id == session.user_id %}message-own{% else %}message-other{% endif %}" 
                              data-message-id="{{ message.id }}">
                             <div class="message-bubble">
+                                <!-- Role Badge -->
+                                <div class="mb-1">
+                                    <span class="badge 
+                                        {% if message.sender.role == 'admin' %}bg-danger
+                                        {% elif message.sender.role == 'seller' %}bg-primary
+                                        {% elif message.sender.role == 'courier' %}bg-info
+                                        {% elif message.sender.role == 'rider' %}bg-success
+                                        {% else %}bg-secondary
+                                        {% endif %} me-2">
+                                        {% if message.sender.role == 'admin' %}
+                                            <i class="fas fa-shield-alt"></i> Admin
+                                        {% elif message.sender.role == 'seller' %}
+                                            <i class="fas fa-store"></i> Seller
+                                        {% elif message.sender.role == 'courier' %}
+                                            <i class="fas fa-truck"></i> Courier
+                                        {% elif message.sender.role == 'rider' %}
+                                            <i class="fas fa-motorcycle"></i> Rider
+                                        {% else %}
+                                            <i class="fas fa-user"></i> Customer
+                                        {% endif %}
+                                    </span>
+                                    <small class="text-muted">{{ message.sender.full_name or message.sender.email.split('@')[0] }}</small>
+                                </div>
                                 <p class="mb-1">{{ message.message_text }}</p>
-                                <small class="message-time">{{ message.created_at.strftime('%I:%M %p') }}</small>
+                                <small class="message-time">
+                                    {{ message.created_at.strftime('%I:%M %p') }}
+                                    {% if message.is_read and message.sender_id == session.user_id %}
+                                        <i class="fas fa-check-double ms-1" title="Read"></i>
+                                    {% elif message.sender_id == session.user_id %}
+                                        <i class="fas fa-check ms-1" title="Sent"></i>
+                                    {% endif %}
+                                </small>
                             </div>
                         </div>
                         {% endfor %}
@@ -58,6 +88,25 @@
 
                 <!-- Chat Input -->
                 <div class="chat-input-area">
+                    <!-- Quick Message Templates -->
+                    <div class="quick-messages mb-2">
+                        <small class="text-muted d-block mb-1">Quick replies:</small>
+                        <div class="d-flex flex-wrap gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('Where is my order?')">
+                                <i class="fas fa-map-marker-alt"></i> Where is my order?
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('I\'m at the pickup location.')">
+                                <i class="fas fa-location-arrow"></i> At pickup location
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('Order is ready.')">
+                                <i class="fas fa-check-circle"></i> Order ready
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('Thank you!')">
+                                <i class="fas fa-heart"></i> Thank you
+                            </button>
+                        </div>
+                    </div>
+                    
                     <form id="messageForm" onsubmit="sendMessage(event)">
                         <div class="input-group">
                             <input type="text" id="messageInput" name="message_text" class="form-control" 
@@ -362,7 +411,31 @@ function sendMessage(event) {
         });
     }, 5000);
 })();
+
+// Quick message function
+function useQuickMessage(text) {
+    const messageInput = document.getElementById('messageInput');
+    messageInput.value = text;
+    messageInput.focus();
+}
 </script>
 
+<style>
+    .quick-messages {
+        padding: 0.5rem 0;
+    }
+    
+    .quick-msg-btn {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 12px;
+    }
+    
+    .quick-msg-btn:hover {
+        background-color: #6366f1;
+        color: white;
+        border-color: #6366f1;
+    }
+</style>
 
 {% endblock %}

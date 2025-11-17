@@ -2166,7 +2166,10 @@ def seller_order_detail(order_id):
     if order.status == 'READY_FOR_PICKUP' and order.pickup_token:
         qr_data = generate_qr_code(order.pickup_token)
     
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data)
+    # Get available couriers
+    couriers = User.query.filter_by(role='courier', is_approved=True, is_suspended=False).all()
+    
+    return render_template('seller_order_detail.html', order=order, qr_data=qr_data, couriers=couriers)
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
@@ -2184,6 +2187,15 @@ def mark_order_ready(order_id):
         flash('Order cannot be marked as ready.', 'warning')
         return redirect(url_for('seller_order_detail', order_id=order_id))
     
+    # Get selected courier if provided
+    courier_id = request.form.get('courier_id')
+    if courier_id and courier_id != '':
+        courier = User.query.get(int(courier_id))
+        if courier and courier.role == 'courier':
+            order.courier_id = courier.id
+            # Calculate courier earnings (60% of delivery fee)
+            order.courier_earnings = order.delivery_fee * Decimal('0.60')
+    
     # Generate pickup token for courier
     order.pickup_token = generate_qr_token(order.id, 'pickup')
     order.status = 'READY_FOR_PICKUP'
@@ -2198,7 +2210,18 @@ def mark_order_ready(order_id):
         f'Your order {order.order_number} is ready for pickup!'
     )
     
-    flash('Order marked as ready for pickup!', 'success')
+    # Notify selected courier if assigned
+    if order.courier_id:
+        courier = User.query.get(order.courier_id)
+        send_email(
+            courier.email,
+            'New Pickup Assignment',
+            f'You have been assigned to pickup order {order.order_number}. Please coordinate with the seller.'
+        )
+        flash(f'Order marked as ready and assigned to {courier.full_name or courier.email}!', 'success')
+    else:
+        flash('Order marked as ready for pickup!', 'success')
+    
     return redirect(url_for('seller_order_detail', order_id=order_id))
 
 
