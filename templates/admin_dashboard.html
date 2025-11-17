@@ -519,8 +519,13 @@
             Admin Dashboard
         </h1>
         
-        <!-- Date Filter -->
+        <!-- Date Filter and Export -->
         <div class="filter-group">
+            <a href="{{ url_for('admin_sales_report_export_pdf', filter=time_filter, start_date=start_date if start_date else '', end_date=end_date if end_date else '') }}" 
+               class="btn btn-danger me-2" style="white-space: nowrap;">
+                <i class="fas fa-file-pdf me-2"></i>Export PDF
+            </a>
+            
             <form method="GET" class="d-flex gap-2 align-items-center" style="margin: 0;">
                 <input type="date" name="start_date" class="filter-input" 
                        value="{{ start_date if start_date else '' }}" 
