@@ -3,84 +3,24 @@
 {% block content %}
 <div class="container-fluid my-4">
   <div class="row">
-    <div class="col-md-3">
+    <!-- Simplified single column layout -->
+    <div class="col-12">
       <div class="card shadow-sm mb-4">
-        <div class="card-header bg-primary text-white">
-          <h5 class="mb-0"><i class="fas fa-users"></i> Support Agents</h5>
-        </div>
-        <div class="card-body">
-          {% if support_agents %}
-          <div class="list-group list-group-flush">
-            {% for agent in support_agents %}
-            <div class="list-group-item px-0">
-              <div class="d-flex justify-content-between align-items-center">
-                <div>
-                  <strong>{{ agent.full_name or agent.email }}</strong>
-                  {% if agent.last_activity and (now - agent.last_activity).total_seconds() < 300 %}
-                  <span class="badge badge-success badge-sm ml-2">
-                    <i class="fas fa-circle"></i> Online
-                  </span>
-                  {% else %}
-                  <span class="badge badge-secondary badge-sm ml-2">
-                    <i class="fas fa-circle"></i> Offline
-                  </span>
-                  {% endif %}
-                </div>
-              </div>
-              {% if agent.last_activity %}
-              <small class="text-muted">Last active: {{ agent.last_activity.strftime('%I:%M %p') }}</small>
-              {% endif %}
-            </div>
-            {% endfor %}
-          </div>
-          {% else %}
-          <p class="text-muted">No support agents available</p>
-          {% endif %}
-        </div>
-      </div>
-
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-info text-white">
-          <h6 class="mb-0"><i class="fas fa-chart-bar"></i> Statistics</h6>
-        </div>
-        <div class="card-body">
-          <div class="mb-2">
-            <strong>Total Conversations:</strong>
-            <span class="badge badge-primary float-right">{{ conversations|length }}</span>
-          </div>
-          <div class="mb-2">
-            <strong>Active Agents:</strong>
-            <span class="badge badge-success float-right">{{ active_agents_count }}</span>
-          </div>
-          <div>
-            <strong>Total Agents:</strong>
-            <span class="badge badge-info float-right">{{ support_agents|length }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="card shadow-sm">
-        <div class="card-header bg-success text-white">
-          <h6 class="mb-0"><i class="fas fa-tools"></i> Admin Actions</h6>
-        </div>
-        <div class="card-body">
-          <a href="{{ url_for('manage_support_agents') }}" class="btn btn-sm btn-primary btn-block mb-2">
-            <i class="fas fa-user-cog"></i> Manage Support Agents
-          </a>
-          <a href="{{ url_for('admin_dashboard') }}" class="btn btn-sm btn-outline-secondary btn-block">
-            <i class="fas fa-arrow-left"></i> Back to Dashboard
-          </a>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-md-9">
-      <div class="card shadow-sm">
         <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
           <h4 class="mb-0">
             <i class="fas fa-headset"></i> All Support Conversations (Admin View)
           </h4>
-          <span class="badge badge-light">{{ conversations|length }} Total</span>
+          <div>
+            <span class="badge bg-light text-dark me-2">
+              <i class="fas fa-comments"></i> Total: {{ conversations|length }}
+            </span>
+            <a href="{{ url_for('manage_support_agents') }}" class="btn btn-sm btn-light">
+              <i class="fas fa-user-cog"></i> Manage Agents
+            </a>
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-sm btn-outline-light">
+              <i class="fas fa-arrow-left"></i> Back
+            </a>
+          </div>
         </div>
         <div class="card-body">
           {% if conversations %}
