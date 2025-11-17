@@ -278,7 +278,7 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'seller_courier', 'buyer_courier', 'user_support', 'user_admin', 'admin_seller', 'admin_courier', 'admin_rider', 'admin_customer'), nullable=False)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -3325,8 +3325,11 @@ def view_conversation(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Check authorization - allow admins to view any conversation
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
+    
+    if not (is_participant or is_admin):
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('messages_inbox'))
     
@@ -3343,7 +3346,8 @@ def view_conversation(conversation_id):
     
     return render_template('conversation.html',
         conversation=conversation,
-        messages=messages
+        messages=messages,
+        is_admin_viewing=(is_admin and not is_participant)
     )
 
 
@@ -3353,8 +3357,11 @@ def send_message(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Check authorization - allow admins to send messages in any conversation
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
+    
+    if not (is_participant or is_admin):
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
     message_text = request.form.get('message_text', '').strip()
@@ -3379,7 +3386,7 @@ def send_message(conversation_id):
         'success': True,
         'message': {
             'id': message.id,
-            'sender_name': user.full_name,
+            'sender_name': user.full_name or user.email,
             'message_text': message.message_text,
             'created_at': message.created_at.strftime('%I:%M %p'),
             'is_own': True
@@ -3486,26 +3493,26 @@ def start_conversation_with_courier(order_id):
     user = User.query.get(session['user_id'])
     order = Order.query.get_or_404(order_id)
     
-    # Check authorization - only buyer or seller can message courier
-    if user.role not in ['buyer', 'seller'] and user.id != order.courier_id:
+    # Check authorization - customer, seller, or courier can participate
+    if user.role not in ['customer', 'seller', 'courier']:
         flash('You are not authorized to view this conversation.', 'danger')
         return redirect(url_for('index'))
     
     # Check if order has a courier assigned
     if not order.courier_id:
         flash('No courier has been assigned to this order yet.', 'warning')
-        return redirect(url_for('order_details', order_id=order_id))
+        return redirect(url_for('customer_order_detail' if user.role == 'customer' else 'seller_order_detail', order_id=order_id))
     
     courier = User.query.get(order.courier_id)
     
     # Determine conversation type based on who is initiating
-    if user.role == 'buyer':
+    if user.role == 'customer':
         conv_type = 'buyer_courier'
         user1_id = user.id
         user2_id = courier.id
     elif user.role == 'seller':
         conv_type = 'seller_courier'
-        user1_id = order.seller_id
+        user1_id = order.shop.seller_id
         user2_id = courier.id
     else:  # User is the courier
         # Find existing conversation
@@ -3911,6 +3918,112 @@ def admin_support_conversations():
         active_agents_count=active_agents_count,
         now=now
     )
+
+
+@app.route('/admin/start-conversation/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def admin_start_conversation(user_id):
+    """Admin initiates a conversation with any user"""
+    admin = User.query.get(session['user_id'])
+    target_user = User.query.get_or_404(user_id)
+    
+    # Determine conversation type based on target user's role
+    conv_type_map = {
+        'customer': 'admin_customer',
+        'seller': 'admin_seller',
+        'courier': 'admin_courier',
+        'rider': 'admin_rider',
+        'admin': 'user_admin'  # Admin to admin conversation
+    }
+    
+    conv_type = conv_type_map.get(target_user.role, 'user_admin')
+    
+    # Check if conversation already exists
+    existing = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == admin.id, Conversation.user2_id == target_user.id),
+            db.and_(Conversation.user1_id == target_user.id, Conversation.user2_id == admin.id)
+        ),
+        Conversation.conversation_type == conv_type
+    ).first()
+    
+    if existing:
+        return redirect(url_for('view_conversation', conversation_id=existing.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=admin.id,
+        user2_id=target_user.id,
+        conversation_type=conv_type
+    )
+    
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('ADMIN_CONVERSATION_STARTED', 'Conversation', conversation.id, 
+              f'Admin started conversation with {target_user.role} {target_user.full_name or target_user.email}')
+    
+    flash(f'Conversation started with {target_user.full_name or target_user.email}', 'success')
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
+@app.route('/admin/start-conversation-order/<int:order_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def admin_start_conversation_order(order_id):
+    """Admin initiates a conversation about a specific order"""
+    admin = User.query.get(session['user_id'])
+    order = Order.query.get_or_404(order_id)
+    
+    # Get target user from query parameter
+    target_role = request.form.get('target_role')  # 'customer', 'seller', 'courier', or 'rider'
+    
+    if target_role == 'customer':
+        target_user = order.customer
+        conv_type = 'admin_customer'
+    elif target_role == 'seller':
+        target_user = order.shop.owner
+        conv_type = 'admin_seller'
+    elif target_role == 'courier' and order.courier_id:
+        target_user = order.courier
+        conv_type = 'admin_courier'
+    elif target_role == 'rider' and order.rider_id:
+        target_user = order.rider
+        conv_type = 'admin_rider'
+    else:
+        flash('Invalid target user or user not assigned to this order.', 'danger')
+        return redirect(url_for('admin_orders'))
+    
+    # Check if conversation already exists for this order
+    existing = Conversation.query.filter(
+        Conversation.order_id == order_id,
+        db.or_(
+            db.and_(Conversation.user1_id == admin.id, Conversation.user2_id == target_user.id),
+            db.and_(Conversation.user1_id == target_user.id, Conversation.user2_id == admin.id)
+        ),
+        Conversation.conversation_type == conv_type
+    ).first()
+    
+    if existing:
+        return redirect(url_for('view_conversation', conversation_id=existing.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=admin.id,
+        user2_id=target_user.id,
+        order_id=order_id,
+        conversation_type=conv_type
+    )
+    
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('ADMIN_ORDER_CONVERSATION_STARTED', 'Conversation', conversation.id, 
+              f'Admin started conversation about order {order.order_number} with {target_role}')
+    
+    flash(f'Conversation started with {target_role} about order {order.order_number}', 'success')
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
 
 @app.route('/admin/logs')
