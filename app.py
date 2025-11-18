@@ -12,6 +12,7 @@ import io
 import base64
 import os
 import secrets
+import uuid
 import pymysql
 pymysql.install_as_MySQLdb()
 from sqlalchemy import Numeric
@@ -294,7 +295,8 @@ class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
     sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    message_text = db.Column(db.Text, nullable=False)
+    message_text = db.Column(db.Text, nullable=True)  # Made nullable to allow image-only messages
+    image = db.Column(db.String(255))  # Image filename for uploaded images
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -3367,10 +3369,16 @@ def view_conversation(conversation_id):
     messages = Message.query.filter_by(conversation_id=conversation_id)\
         .order_by(Message.created_at.asc()).all()
     
+    # Update user last activity
+    user.last_activity = datetime.utcnow()
+    db.session.commit()
+    
     return render_template('conversation.html',
         conversation=conversation,
         messages=messages,
-        is_admin_viewing=(is_admin and not is_participant)
+        is_admin_viewing=(is_admin and not is_participant),
+        now=datetime.utcnow,
+        timedelta=timedelta
     )
 
 
@@ -3388,17 +3396,43 @@ def send_message(conversation_id):
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
     message_text = request.form.get('message_text', '').strip()
-    print("DEBUG received message_text =", message_text)
-    if not message_text:
+    image_file = request.files.get('image')
+    
+    # Require either text or image
+    if not message_text and not image_file:
         return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
     
+    # Handle image upload if present
+    image_filename = None
+    if image_file and image_file.filename:
+        # Check file extension
+        allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+        file_ext = image_file.filename.rsplit('.', 1)[1].lower() if '.' in image_file.filename else ''
+        
+        if file_ext not in allowed_extensions:
+            return jsonify({'success': False, 'message': 'Invalid image format. Allowed: png, jpg, jpeg, gif, webp'}), 400
+        
+        # Generate unique filename
+        import uuid
+        image_filename = f"chat_{uuid.uuid4().hex}.{file_ext}"
+        
+        # Save image
+        upload_folder = os.path.join(app.root_path, 'static', 'uploads')
+        os.makedirs(upload_folder, exist_ok=True)
+        image_file.save(os.path.join(upload_folder, image_filename))
+    
+    # Create message
     message = Message(
         conversation_id=conversation_id,
         sender_id=user.id,
-        message_text=message_text
+        message_text=message_text if message_text else None,
+        image=image_filename
     )
     
     conversation.last_message_at = datetime.utcnow()
+    
+    # Update user last activity
+    user.last_activity = datetime.utcnow()
     
     db.session.add(message)
     db.session.commit()
@@ -3411,6 +3445,7 @@ def send_message(conversation_id):
             'id': message.id,
             'sender_name': user.full_name or user.email,
             'message_text': message.message_text,
+            'image': image_filename,
             'created_at': message.created_at.strftime('%I:%M %p'),
             'is_own': True
         }
