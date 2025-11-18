@@ -1,597 +1,659 @@
-{% extends "base.html" %}
-
-{% block content %}
+{% extends "base.html" %} {% block content %}
 <div class="container">
-    <div class="row justify-content-center">
-        <div class="col-lg-8">
-            <div class="chat-container">
-                <!-- Chat Header -->
-                <div class="chat-header">
-                    <div class="d-flex align-items-center">
-                        <a href="{{ url_for('messages_inbox') }}" class="btn btn-link text-white me-3">
-                            <i class="fas fa-arrow-left"></i>
-                        </a>
-                        <div class="avatar-circle me-3">
-                            {% set other_user = conversation.user2 if conversation.user1_id == session.user_id else conversation.user1 %}
-                            <i class="fas {% if other_user.role == 'seller' %}fa-store{% elif other_user.role == 'rider' %}fa-motorcycle{% else %}fa-user{% endif %} fa-lg"></i>
-                        </div>
-                        <div>
-                            <h5 class="mb-0">
-                                {% if conversation.conversation_type == 'buyer_seller' and conversation.shop %}
-                                    {{ conversation.shop.name }}
-                                {% else %}
-                                    {{ other_user.full_name or other_user.email.split('@')[0] }}
-                                {% endif %}
-                            </h5>
-                            <small class="text-white-50">
-                                {% set now = now() %}
-                                {% if other_user.last_activity %}
-                                    {% set time_diff = (now - other_user.last_activity).total_seconds() %}
-                                    {% if time_diff < 300 %}
-                                        <i class="fas fa-circle text-success" style="font-size: 0.5rem;"></i> Online
-                                    {% else %}
-                                        <i class="fas fa-circle text-secondary" style="font-size: 0.5rem;"></i> 
-                                        {% if time_diff < 3600 %}
-                                            Last active {{ (time_diff / 60)|int }} minutes ago
-                                        {% elif time_diff < 86400 %}
-                                            Last active {{ (time_diff / 3600)|int }} hours ago
-                                        {% elif time_diff < 172800 %}
-                                            Last active yesterday, {{ other_user.last_activity.strftime('%I:%M %p') }}
-                                        {% else %}
-                                            Last active {{ other_user.last_activity.strftime('%b %d, %I:%M %p') }}
-                                        {% endif %}
-                                    {% endif %}
-                                {% else %}
-                                    <i class="fas fa-circle text-secondary" style="font-size: 0.5rem;"></i> Offline
-                                {% endif %}
-                            </small>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Chat Messages -->
-                <div class="chat-messages" id="chatMessages">
-                    {% if messages %}
-                        {% set current_date = None %}
-                        {% set now = now() %}
-                        {% for message in messages %}
-                            {% set message_date = message.created_at.date() %}
-                            {% if current_date != message_date %}
-                                {% set current_date = message_date %}
-                                <div class="date-separator">
-                                    <span class="date-label">
-                                        {% if message_date == now.date() %}
-                                            Today
-                                        {% elif message_date == (now - timedelta(days=1)).date() %}
-                                            Yesterday
-                                        {% else %}
-                                            {{ message.created_at.strftime('%b %d, %Y') }}
-                                        {% endif %}
-                                    </span>
-                                </div>
-                            {% endif %}
-                            
-                        <div class="message {% if message.sender_id == session.user_id %}message-own{% else %}message-other{% endif %}" 
-                             data-message-id="{{ message.id }}">
-                            <div class="message-bubble">
-                                <!-- Role Badge -->
-                                <div class="mb-1">
-                                    <span class="badge 
-                                        {% if message.sender.role == 'admin' %}bg-danger
-                                        {% elif message.sender.role == 'seller' %}bg-primary
-                                        {% elif message.sender.role == 'courier' %}bg-info
-                                        {% elif message.sender.role == 'rider' %}bg-success
-                                        {% else %}bg-secondary
-                                        {% endif %} me-2">
-                                        {% if message.sender.role == 'admin' %}
-                                            <i class="fas fa-shield-alt"></i> Admin
-                                        {% elif message.sender.role == 'seller' %}
-                                            <i class="fas fa-store"></i> Seller
-                                        {% elif message.sender.role == 'courier' %}
-                                            <i class="fas fa-truck"></i> Courier
-                                        {% elif message.sender.role == 'rider' %}
-                                            <i class="fas fa-motorcycle"></i> Rider
-                                        {% else %}
-                                            <i class="fas fa-user"></i> Customer
-                                        {% endif %}
-                                    </span>
-                                    <small class="text-muted">{{ message.sender.full_name or message.sender.email.split('@')[0] }}</small>
-                                </div>
-                                
-                                <!-- Image if exists -->
-                                {% if message.image %}
-                                <div class="message-image mb-2">
-                                    <img src="{{ url_for('static', filename='uploads/' + message.image) }}" 
-                                         alt="Image" 
-                                         class="img-fluid rounded"
-                                         style="max-width: 300px; cursor: pointer;"
-                                         onclick="openImageModal('{{ url_for('static', filename='uploads/' + message.image) }}')">
-                                </div>
-                                {% endif %}
-                                
-                                <!-- Message text if exists -->
-                                {% if message.message_text %}
-                                <p class="mb-1">{{ message.message_text }}</p>
-                                {% endif %}
-                                
-                                <small class="message-time">
-                                    {{ message.created_at.strftime('%I:%M %p') }}
-                                    {% if message.is_read and message.sender_id == session.user_id %}
-                                        <i class="fas fa-check-double ms-1" title="Read"></i>
-                                    {% elif message.sender_id == session.user_id %}
-                                        <i class="fas fa-check ms-1" title="Sent"></i>
-                                    {% endif %}
-                                </small>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                    <div class="text-center p-5 text-muted">
-                        <i class="fas fa-comments fa-3x mb-3"></i>
-                        <p>Start your conversation</p>
-                    </div>
-                    {% endif %}
-                </div>
-
-                <!-- Chat Input -->
-                <div class="chat-input-area">
-                    <!-- Quick Message Templates -->
-                    <div class="quick-messages mb-2">
-                        <small class="text-muted d-block mb-1">Quick replies:</small>
-                        <div class="d-flex flex-wrap gap-1">
-                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('Where is my order?')">
-                                <i class="fas fa-map-marker-alt"></i> Where is my order?
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('I\'m at the pickup location.')">
-                                <i class="fas fa-location-arrow"></i> At pickup location
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('Order is ready.')">
-                                <i class="fas fa-check-circle"></i> Order ready
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary quick-msg-btn" onclick="useQuickMessage('Thank you!')">
-                                <i class="fas fa-heart"></i> Thank you
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <form id="messageForm" onsubmit="sendMessage(event)" enctype="multipart/form-data">
-                        <!-- Image Preview Area -->
-                        <div id="imagePreview" class="mb-2" style="display: none;">
-                            <div class="position-relative d-inline-block">
-                                <img id="previewImg" src="" alt="Preview" class="img-thumbnail" style="max-height: 150px;">
-                                <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-1" onclick="removeImagePreview()">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                            <div id="uploadProgress" class="progress mt-2" style="display: none; height: 5px;">
-                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        
-                        <div class="input-group">
-                            <input type="file" id="imageInput" name="image" class="d-none" accept="image/*" onchange="previewImage(event)">
-                            <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('imageInput').click()" title="Attach image">
-                                <i class="fas fa-image"></i>
-                            </button>
-                            <input type="text" id="messageInput" name="message_text" class="form-control" 
-                                   placeholder="Type your message..." autocomplete="off">
-                            <button type="submit" class="btn btn-primary" id="sendBtn">
-                                <i class="fas fa-paper-plane"></i>
-                            </button>
-                        </div>
-                    </form>
-                </div>
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="chat-container">
+        <!-- Chat Header -->
+        <div class="chat-header">
+          <div class="d-flex align-items-center">
+            <a
+              href="{{ url_for('messages_inbox') }}"
+              class="btn btn-link text-white me-3"
+            >
+              <i class="fas fa-arrow-left"></i>
+            </a>
+            <div class="avatar-circle me-3">
+              {% set other_user = conversation.user2 if conversation.user1_id ==
+              session.user_id else conversation.user1 %}
+              <i
+                class="fas {% if other_user.role == 'seller' %}fa-store{% elif other_user.role == 'rider' %}fa-motorcycle{% else %}fa-user{% endif %} fa-lg"
+              ></i>
             </div>
+            <div>
+              <h5 class="mb-0">
+                {% if conversation.conversation_type == 'buyer_seller' and
+                conversation.shop %} {{ conversation.shop.name }} {% else %} {{
+                other_user.full_name or other_user.email.split('@')[0] }} {%
+                endif %}
+              </h5>
+              <small class="text-white-50">
+                {% if other_user.last_activity %} {% set time_diff = (now -
+                other_user.last_activity).total_seconds() %} {% if time_diff <
+                300 %}
+                <i
+                  class="fas fa-circle text-success"
+                  style="font-size: 0.5rem"
+                ></i>
+                Online {% else %}
+                <i
+                  class="fas fa-circle text-secondary"
+                  style="font-size: 0.5rem"
+                ></i>
+                {% if time_diff < 3600 %} Last active {{ (time_diff / 60)|int }}
+                minutes ago {% elif time_diff < 86400 %} Last active {{
+                (time_diff / 3600)|int }} hours ago {% elif time_diff < 172800
+                %} Last active yesterday, {{
+                other_user.last_activity.strftime('%I:%M %p') }} {% else %} Last
+                active {{ other_user.last_activity.strftime('%b %d, %I:%M %p')
+                }} {% endif %} {% endif %} {% else %}
+                <i
+                  class="fas fa-circle text-secondary"
+                  style="font-size: 0.5rem"
+                ></i>
+                Offline {% endif %}
+              </small>
+            </div>
+          </div>
         </div>
+
+        <!-- Chat Messages -->
+        <div class="chat-messages" id="chatMessages">
+          {% if messages %} {% set current_date = None %} {# now is already a
+          datetime object passed from the view #} {% for message in messages %}
+          {% set message_date = message.created_at.date() %} {% if current_date
+          != message_date %} {% set current_date = message_date %}
+          <div class="date-separator">
+            <span class="date-label">
+              {% if message_date == now.date() %} Today {% elif message_date ==
+              (now - timedelta(days=1)).date() %} Yesterday {% else %} {{
+              message.created_at.strftime('%b %d, %Y') }} {% endif %}
+            </span>
+          </div>
+          {% endif %}
+
+          <div
+            class="message {% if message.sender_id == session.user_id %}message-own{% else %}message-other{% endif %}"
+            data-message-id="{{ message.id }}"
+          >
+            <div class="message-bubble">
+              <!-- Role Badge -->
+              <div class="mb-1">
+                <span
+                  class="badge {% if message.sender.role == 'admin' %}bg-danger {% elif message.sender.role == 'seller' %}bg-primary {% elif message.sender.role == 'courier' %}bg-info {% elif message.sender.role == 'rider' %}bg-success {% else %}bg-secondary {% endif %} me-2"
+                >
+                  {% if message.sender.role == 'admin' %}
+                  <i class="fas fa-shield-alt"></i> Admin {% elif
+                  message.sender.role == 'seller' %}
+                  <i class="fas fa-store"></i> Seller {% elif
+                  message.sender.role == 'courier' %}
+                  <i class="fas fa-truck"></i> Courier {% elif
+                  message.sender.role == 'rider' %}
+                  <i class="fas fa-motorcycle"></i> Rider {% else %}
+                  <i class="fas fa-user"></i> Customer {% endif %}
+                </span>
+                <small class="text-muted"
+                  >{{ message.sender.full_name or
+                  message.sender.email.split('@')[0] }}</small
+                >
+              </div>
+
+              <!-- Image if exists -->
+              {% if message.image %}
+              <div class="message-image mb-2">
+                <img
+                  src="{{ url_for('static', filename='uploads/' + message.image) }}"
+                  alt="Image"
+                  class="img-fluid rounded"
+                  style="max-width: 300px; cursor: pointer"
+                  onclick="openImageModal('{{ url_for('static', filename='uploads/' + message.image) }}')"
+                />
+              </div>
+              {% endif %}
+
+              <!-- Message text if exists -->
+              {% if message.message_text %}
+              <p class="mb-1">{{ message.message_text }}</p>
+              {% endif %}
+
+              <small class="message-time">
+                {{ message.created_at.strftime('%I:%M %p') }} {% if
+                message.is_read and message.sender_id == session.user_id %}
+                <i class="fas fa-check-double ms-1" title="Read"></i>
+                {% elif message.sender_id == session.user_id %}
+                <i class="fas fa-check ms-1" title="Sent"></i>
+                {% endif %}
+              </small>
+            </div>
+          </div>
+          {% endfor %} {% else %}
+          <div class="text-center p-5 text-muted">
+            <i class="fas fa-comments fa-3x mb-3"></i>
+            <p>Start your conversation</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Chat Input -->
+        <div class="chat-input-area">
+          <!-- Quick Message Templates -->
+          <div class="quick-messages mb-2">
+            <small class="text-muted d-block mb-1">Quick replies:</small>
+            <div class="d-flex flex-wrap gap-1">
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary quick-msg-btn"
+                onclick="useQuickMessage('Where is my order?')"
+              >
+                <i class="fas fa-map-marker-alt"></i> Where is my order?
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary quick-msg-btn"
+                onclick="useQuickMessage('I\'m at the pickup location.')"
+              >
+                <i class="fas fa-location-arrow"></i> At pickup location
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary quick-msg-btn"
+                onclick="useQuickMessage('Order is ready.')"
+              >
+                <i class="fas fa-check-circle"></i> Order ready
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary quick-msg-btn"
+                onclick="useQuickMessage('Thank you!')"
+              >
+                <i class="fas fa-heart"></i> Thank you
+              </button>
+            </div>
+          </div>
+
+          <form
+            id="messageForm"
+            onsubmit="sendMessage(event)"
+            enctype="multipart/form-data"
+          >
+            <!-- Image Preview Area -->
+            <div id="imagePreview" class="mb-2" style="display: none">
+              <div class="position-relative d-inline-block">
+                <img
+                  id="previewImg"
+                  src=""
+                  alt="Preview"
+                  class="img-thumbnail"
+                  style="max-height: 150px"
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm btn-danger position-absolute top-0 end-0 m-1"
+                  onclick="removeImagePreview()"
+                >
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+              <div
+                id="uploadProgress"
+                class="progress mt-2"
+                style="display: none; height: 5px"
+              >
+                <div
+                  class="progress-bar progress-bar-striped progress-bar-animated"
+                  role="progressbar"
+                  style="width: 0%"
+                ></div>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <input
+                type="file"
+                id="imageInput"
+                name="image"
+                class="d-none"
+                accept="image/*"
+                onchange="previewImage(event)"
+              />
+              <button
+                type="button"
+                class="btn btn-outline-secondary"
+                onclick="document.getElementById('imageInput').click()"
+                title="Attach image"
+              >
+                <i class="fas fa-image"></i>
+              </button>
+              <input
+                type="text"
+                id="messageInput"
+                name="message_text"
+                class="form-control"
+                placeholder="Type your message..."
+                autocomplete="off"
+              />
+              <button type="submit" class="btn btn-primary" id="sendBtn">
+                <i class="fas fa-paper-plane"></i>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
+  </div>
 </div>
 
 <style>
+  .chat-container {
+    background: white;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 140px);
+    max-height: calc(100vh - 140px);
+  }
+
+  @media (max-width: 768px) {
     .chat-container {
-        background: white;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-        display: flex;
-        flex-direction: column;
-        height: calc(100vh - 140px);
-        max-height: calc(100vh - 140px);
+      height: calc(100vh - 120px);
+      max-height: calc(100vh - 120px);
     }
-    
-    @media (max-width: 768px) {
-        .chat-container {
-            height: calc(100vh - 120px);
-            max-height: calc(100vh - 120px);
-        }
+  }
+
+  @media (max-width: 576px) {
+    .chat-container {
+      height: calc(100vh - 90px);
+      max-height: calc(100vh - 90px);
+      border-radius: 12px;
     }
-    
-    @media (max-width: 576px) {
-        .chat-container {
-            height: calc(100vh - 90px);
-            max-height: calc(100vh - 90px);
-            border-radius: 12px;
-        }
-    }
-    
+  }
+
+  .chat-header {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    padding: 1.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 576px) {
     .chat-header {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        color: white;
-        padding: 1.25rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        flex-shrink: 0;
+      padding: 1rem;
     }
-    
-    @media (max-width: 576px) {
-        .chat-header {
-            padding: 1rem;
-        }
+  }
+
+  .avatar-circle {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .chat-messages {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 1.5rem;
+    background: #f8fafc;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+    position: relative;
+  }
+
+  .chat-messages::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .chat-messages::-webkit-scrollbar-track {
+    background: #e2e8f0;
+    border-radius: 4px;
+  }
+
+  .chat-messages::-webkit-scrollbar-thumb {
+    background: #cbd5e0;
+    border-radius: 4px;
+    transition: background 0.2s;
+  }
+
+  .chat-messages::-webkit-scrollbar-thumb:hover {
+    background: #a0aec0;
+  }
+
+  .message {
+    margin-bottom: 1rem;
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
     }
-    
-    .avatar-circle {
-        width: 45px;
-        height: 45px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.2);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
-    
-    .chat-messages {
-        flex: 1 1 auto;
-        overflow-y: auto;
-        overflow-x: hidden;
-        padding: 1.5rem;
-        background: #f8fafc;
-        scroll-behavior: smooth;
-        -webkit-overflow-scrolling: touch;
-        min-height: 0;
-        position: relative;
-    }
-    
-    .chat-messages::-webkit-scrollbar {
-        width: 8px;
-    }
-    
-    .chat-messages::-webkit-scrollbar-track {
-        background: #e2e8f0;
-        border-radius: 4px;
-    }
-    
-    .chat-messages::-webkit-scrollbar-thumb {
-        background: #cbd5e0;
-        border-radius: 4px;
-        transition: background 0.2s;
-    }
-    
-    .chat-messages::-webkit-scrollbar-thumb:hover {
-        background: #a0aec0;
-    }
-    
-    .message {
-        margin-bottom: 1rem;
-        animation: fadeIn 0.3s ease;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    .date-separator {
-        text-align: center;
-        margin: 1.5rem 0;
-        position: relative;
-    }
-    
-    .date-separator::before {
-        content: '';
-        position: absolute;
-        top: 50%;
-        left: 0;
-        right: 0;
-        height: 1px;
-        background: #e2e8f0;
-        z-index: 0;
-    }
-    
-    .date-label {
-        position: relative;
-        z-index: 1;
-        background: #f8fafc;
-        padding: 0.25rem 1rem;
-        font-size: 0.75rem;
-        color: #64748b;
-        font-weight: 500;
-        border-radius: 12px;
-    }
-    
-    .message-bubble {
-        max-width: 70%;
-        padding: 0.875rem 1.125rem;
-        border-radius: 18px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    }
-    
-    .message-own {
-        text-align: right;
-    }
-    
-    .message-own .message-bubble {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        color: white;
-        margin-left: auto;
-        border-bottom-right-radius: 4px;
-    }
-    
-    .message-other .message-bubble {
-        background: white;
-        border-bottom-left-radius: 4px;
-    }
-    
-    .message-time {
-        font-size: 0.75rem;
-        opacity: 0.7;
-    }
-    
-    .message-image img {
-        border-radius: 8px;
-        transition: transform 0.2s;
-    }
-    
-    .message-image img:hover {
-        transform: scale(1.02);
-    }
-    
+  }
+
+  .date-separator {
+    text-align: center;
+    margin: 1.5rem 0;
+    position: relative;
+  }
+
+  .date-separator::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #e2e8f0;
+    z-index: 0;
+  }
+
+  .date-label {
+    position: relative;
+    z-index: 1;
+    background: #f8fafc;
+    padding: 0.25rem 1rem;
+    font-size: 0.75rem;
+    color: #64748b;
+    font-weight: 500;
+    border-radius: 12px;
+  }
+
+  .message-bubble {
+    max-width: 70%;
+    padding: 0.875rem 1.125rem;
+    border-radius: 18px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  .message-own {
+    text-align: right;
+  }
+
+  .message-own .message-bubble {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    margin-left: auto;
+    border-bottom-right-radius: 4px;
+  }
+
+  .message-other .message-bubble {
+    background: white;
+    border-bottom-left-radius: 4px;
+  }
+
+  .message-time {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  .message-image img {
+    border-radius: 8px;
+    transition: transform 0.2s;
+  }
+
+  .message-image img:hover {
+    transform: scale(1.02);
+  }
+
+  .chat-input-area {
+    padding: 1rem;
+    background: white;
+    border-top: 1px solid #e2e8f0;
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 576px) {
     .chat-input-area {
-        padding: 1rem;
-        background: white;
-        border-top: 1px solid #e2e8f0;
-        flex-shrink: 0;
+      padding: 0.75rem;
     }
-    
-    @media (max-width: 576px) {
-        .chat-input-area {
-            padding: 0.75rem;
-        }
-    }
-    
-    .chat-input-area .form-control {
-        border-radius: 24px;
-        padding: 0.75rem 1.25rem;
-        border: 2px solid #e2e8f0;
-    }
-    
-    .chat-input-area .form-control:focus {
-        border-color: #6366f1;
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-    }
-    
-    .chat-input-area .btn-primary {
-        border-radius: 50%;
-        width: 45px;
-        height: auto;
-        padding: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
+  }
+
+  .chat-input-area .form-control {
+    border-radius: 24px;
+    padding: 0.75rem 1.25rem;
+    border: 2px solid #e2e8f0;
+  }
+
+  .chat-input-area .form-control:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  }
+
+  .chat-input-area .btn-primary {
+    border-radius: 50%;
+    width: 45px;
+    height: auto;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 </style>
 
 <script>
-// Auto-scroll to bottom of chat messages
-function scrollToBottom(smooth = false) {
-    const chatMessages = document.getElementById('chatMessages');
-    if (chatMessages) {
-        if (smooth) {
-            chatMessages.scrollTo({
-                top: chatMessages.scrollHeight,
-                behavior: 'smooth'
-            });
-        } else {
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-    }
-}
+  // Auto-scroll to bottom of chat messages
+  function scrollToBottom(smooth = false) {
+      const chatMessages = document.getElementById('chatMessages');
+      if (chatMessages) {
+          if (smooth) {
+              chatMessages.scrollTo({
+                  top: chatMessages.scrollHeight,
+                  behavior: 'smooth'
+              });
+          } else {
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+      }
+  }
 
-// Scroll to bottom on page load
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(() => scrollToBottom(false), 100);
-});
+  // Scroll to bottom on page load
+  document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(() => scrollToBottom(false), 100);
+  });
 
-// Also scroll after all images and content loaded
-window.addEventListener('load', function() {
-    setTimeout(() => scrollToBottom(false), 100);
-});
+  // Also scroll after all images and content loaded
+  window.addEventListener('load', function() {
+      setTimeout(() => scrollToBottom(false), 100);
+  });
 
-// Auto-scroll when new message is sent
-function sendMessage(event) {
-    event.preventDefault();
-    
-    const form = event.target;
-    const messageInput = document.getElementById('messageInput');
-    const imageInput = document.getElementById('imageInput');
-    const messageText = messageInput.value.trim();
-    const hasImage = imageInput.files.length > 0;
-    
-    // Require either text or image
-    if (!messageText && !hasImage) {
-        alert('Please enter a message or select an image');
-        return;
-    }
-    
-    // Disable input while sending
-    messageInput.disabled = true;
-    const sendBtn = document.getElementById('sendBtn');
-    sendBtn.disabled = true;
-    
-    // Show upload progress if image is present
-    if (hasImage) {
-        document.getElementById('uploadProgress').style.display = 'block';
-    }
-    
-    const formData = new FormData(form);
-    const conversationId = {{ conversation.id }};
-    
-    fetch(`/messages/send/${conversationId}`, {
-        method: 'POST',
-        body: formData,
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.success) {
-            // Reload page to show new message with proper formatting
-            location.reload();
-        } else {
-            alert('Failed to send message: ' + (data.message || 'Unknown error'));
-            messageInput.disabled = false;
-            sendBtn.disabled = false;
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Failed to send message. Please check your connection and try again.');
-        messageInput.disabled = false;
-        sendBtn.disabled = false;
-        document.getElementById('uploadProgress').style.display = 'none';
-    });
-}
+  // Auto-scroll when new message is sent
+  function sendMessage(event) {
+      event.preventDefault();
 
-// Image preview function
-function previewImage(event) {
-    const file = event.target.files[0];
-    if (file) {
-        // Check file size (max 5MB)
-        if (file.size > 5 * 1024 * 1024) {
-            alert('Image size must be less than 5MB');
-            event.target.value = '';
-            return;
-        }
-        
-        // Check file type
-        if (!file.type.startsWith('image/')) {
-            alert('Please select an image file');
-            event.target.value = '';
-            return;
-        }
-        
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            document.getElementById('previewImg').src = e.target.result;
-            document.getElementById('imagePreview').style.display = 'block';
-        };
-        reader.readAsDataURL(file);
-    }
-}
+      const form = event.target;
+      const messageInput = document.getElementById('messageInput');
+      const imageInput = document.getElementById('imageInput');
+      const messageText = messageInput.value.trim();
+      const hasImage = imageInput.files.length > 0;
 
-// Remove image preview
-function removeImagePreview() {
-    document.getElementById('imageInput').value = '';
-    document.getElementById('imagePreview').style.display = 'none';
-    document.getElementById('previewImg').src = '';
-}
+      // Require either text or image
+      if (!messageText && !hasImage) {
+          alert('Please enter a message or select an image');
+          return;
+      }
 
-// Open image modal
-function openImageModal(imageSrc) {
-    // Create modal if it doesn't exist
-    let modal = document.getElementById('imageModal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'imageModal';
-        modal.className = 'modal fade';
-        modal.innerHTML = `
-            <div class="modal-dialog modal-dialog-centered modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Image</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body text-center">
-                        <img id="modalImage" src="" class="img-fluid" alt="Full size image">
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-    }
-    
-    document.getElementById('modalImage').src = imageSrc;
-    const bsModal = new bootstrap.Modal(modal);
-    bsModal.show();
-}
+      // Disable input while sending
+      messageInput.disabled = true;
+      const sendBtn = document.getElementById('sendBtn');
+      sendBtn.disabled = true;
 
-// Check for new messages periodically
-(function() {
-    let lastMessageId = 0;
-    const messageElements = document.querySelectorAll('[data-message-id]');
-    if (messageElements.length > 0) {
-        lastMessageId = parseInt(messageElements[messageElements.length - 1].dataset.messageId);
-    }
-    
-    setInterval(function() {
-        const conversationId = {{ conversation.id }};
-        
-        fetch(`/conversation/${conversationId}/check_new?last_id=${lastMessageId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.messages && data.messages.length > 0) {
-                const chatMessages = document.getElementById('chatMessages');
-                data.messages.forEach(message => {
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = 'message message-other';
-                    messageDiv.dataset.messageId = message.id;
-                    messageDiv.innerHTML = `
-                        <div class="message-bubble">
-                            <p class="mb-1">${message.message_text}</p>
-                            <small class="message-time">${message.created_at}</small>
-                        </div>
-                    `;
-                    chatMessages.appendChild(messageDiv);
-                    lastMessageId = message.id;
-                });
-                
-                // Auto-scroll to new messages
-                scrollToBottom(true);
-            }
-        })
-        .catch(error => {
-            console.error('Error checking for new messages:', error);
-        });
-    }, 5000);
-})();
+      // Show upload progress if image is present
+      if (hasImage) {
+          document.getElementById('uploadProgress').style.display = 'block';
+      }
 
-// Quick message function
-function useQuickMessage(text) {
-    const messageInput = document.getElementById('messageInput');
-    messageInput.value = text;
-    messageInput.focus();
-}
+      const formData = new FormData(form);
+      const conversationId = {{ conversation.id }};
+
+      fetch(`/messages/send/${conversationId}`, {
+          method: 'POST',
+          body: formData,
+          headers: {
+              'X-Requested-With': 'XMLHttpRequest'
+          }
+      })
+      .then(response => {
+          if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          return response.json();
+      })
+      .then(data => {
+          if (data.success) {
+              // Reload page to show new message with proper formatting
+              location.reload();
+          } else {
+              alert('Failed to send message: ' + (data.message || 'Unknown error'));
+              messageInput.disabled = false;
+              sendBtn.disabled = false;
+          }
+      })
+      .catch(error => {
+          console.error('Error:', error);
+          alert('Failed to send message. Please check your connection and try again.');
+          messageInput.disabled = false;
+          sendBtn.disabled = false;
+          document.getElementById('uploadProgress').style.display = 'none';
+      });
+  }
+
+  // Image preview function
+  function previewImage(event) {
+      const file = event.target.files[0];
+      if (file) {
+          // Check file size (max 5MB)
+          if (file.size > 5 * 1024 * 1024) {
+              alert('Image size must be less than 5MB');
+              event.target.value = '';
+              return;
+          }
+
+          // Check file type
+          if (!file.type.startsWith('image/')) {
+              alert('Please select an image file');
+              event.target.value = '';
+              return;
+          }
+
+          const reader = new FileReader();
+          reader.onload = function(e) {
+              document.getElementById('previewImg').src = e.target.result;
+              document.getElementById('imagePreview').style.display = 'block';
+          };
+          reader.readAsDataURL(file);
+      }
+  }
+
+  // Remove image preview
+  function removeImagePreview() {
+      document.getElementById('imageInput').value = '';
+      document.getElementById('imagePreview').style.display = 'none';
+      document.getElementById('previewImg').src = '';
+  }
+
+  // Open image modal
+  function openImageModal(imageSrc) {
+      // Create modal if it doesn't exist
+      let modal = document.getElementById('imageModal');
+      if (!modal) {
+          modal = document.createElement('div');
+          modal.id = 'imageModal';
+          modal.className = 'modal fade';
+          modal.innerHTML = `
+              <div class="modal-dialog modal-dialog-centered modal-lg">
+                  <div class="modal-content">
+                      <div class="modal-header">
+                          <h5 class="modal-title">Image</h5>
+                          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                      </div>
+                      <div class="modal-body text-center">
+                          <img id="modalImage" src="" class="img-fluid" alt="Full size image">
+                      </div>
+                  </div>
+              </div>
+          `;
+          document.body.appendChild(modal);
+      }
+
+      document.getElementById('modalImage').src = imageSrc;
+      const bsModal = new bootstrap.Modal(modal);
+      bsModal.show();
+  }
+
+  // Check for new messages periodically
+  (function() {
+      let lastMessageId = 0;
+      const messageElements = document.querySelectorAll('[data-message-id]');
+      if (messageElements.length > 0) {
+          lastMessageId = parseInt(messageElements[messageElements.length - 1].dataset.messageId);
+      }
+
+      setInterval(function() {
+          const conversationId = {{ conversation.id }};
+
+          fetch(`/conversation/${conversationId}/check_new?last_id=${lastMessageId}`)
+          .then(response => response.json())
+          .then(data => {
+              if (data.success && data.messages && data.messages.length > 0) {
+                  const chatMessages = document.getElementById('chatMessages');
+                  data.messages.forEach(message => {
+                      const messageDiv = document.createElement('div');
+                      messageDiv.className = 'message message-other';
+                      messageDiv.dataset.messageId = message.id;
+                      messageDiv.innerHTML = `
+                          <div class="message-bubble">
+                              <p class="mb-1">${message.message_text}</p>
+                              <small class="message-time">${message.created_at}</small>
+                          </div>
+                      `;
+                      chatMessages.appendChild(messageDiv);
+                      lastMessageId = message.id;
+                  });
+
+                  // Auto-scroll to new messages
+                  scrollToBottom(true);
+              }
+          })
+          .catch(error => {
+              console.error('Error checking for new messages:', error);
+          });
+      }, 5000);
+  })();
+
+  // Quick message function
+  function useQuickMessage(text) {
+      const messageInput = document.getElementById('messageInput');
+      messageInput.value = text;
+      messageInput.focus();
+  }
 </script>
 
 <style>
-    .quick-messages {
-        padding: 0.5rem 0;
-    }
-    
-    .quick-msg-btn {
-        font-size: 0.75rem;
-        padding: 0.25rem 0.5rem;
-        border-radius: 12px;
-    }
-    
-    .quick-msg-btn:hover {
-        background-color: #6366f1;
-        color: white;
-        border-color: #6366f1;
-    }
+  .quick-messages {
+    padding: 0.5rem 0;
+  }
+
+  .quick-msg-btn {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+  }
+
+  .quick-msg-btn:hover {
+    background-color: #6366f1;
+    color: white;
+    border-color: #6366f1;
+  }
 </style>
 
 {% endblock %}

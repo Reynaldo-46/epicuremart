@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -12,16 +12,9 @@ import io
 import base64
 import os
 import secrets
-import uuid
 import pymysql
 pymysql.install_as_MySQLdb()
 from sqlalchemy import Numeric
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
 
 app = Flask(__name__)
@@ -279,7 +272,7 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'seller_courier', 'buyer_courier', 'user_support', 'user_admin', 'admin_seller', 'admin_courier', 'admin_rider', 'admin_customer'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin'), nullable=False)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -295,33 +288,11 @@ class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
     sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    message_text = db.Column(db.Text, nullable=True)  # Made nullable to allow image-only messages
-    image = db.Column(db.String(255))  # Image filename for uploaded images
+    message_text = db.Column(db.Text, nullable=False)
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
-
-
-class WithdrawalRequest(db.Model):
-    __tablename__ = 'withdrawal_requests'
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    amount = db.Column(Numeric(10, 2), nullable=False)
-    payout_method = db.Column(db.String(50), nullable=False)  # e.g., 'bank_transfer', 'gcash', 'paymaya'
-    account_name = db.Column(db.String(100), nullable=False)
-    account_number = db.Column(db.String(100), nullable=False)
-    notes = db.Column(db.Text)
-    status = db.Column(db.Enum('pending', 'processing', 'completed', 'rejected'), default='pending')
-    rejection_reason = db.Column(db.Text)
-    processed_by = db.Column(db.Integer, db.ForeignKey('users.id'))
-    processed_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    user = db.relationship('User', foreign_keys=[user_id], backref='withdrawal_requests')
-    processor = db.relationship('User', foreign_keys=[processed_by])
     
 # ==================== HELPER FUNCTIONS ====================
 
@@ -430,154 +401,6 @@ def generate_order_number():
     timestamp = datetime.now().strftime('%Y%m%d')
     random_part = ''.join([str(random.randint(0, 9)) for _ in range(6)])
     return f"EM{timestamp}{random_part}"
-
-
-def generate_sales_report_pdf(report_data, report_type='seller'):
-    """Generate PDF for sales reports
-    
-    Args:
-        report_data: dict containing report information
-        report_type: 'seller', 'admin', 'courier', or 'rider'
-    """
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
-    
-    # Container for PDF elements
-    elements = []
-    styles = getSampleStyleSheet()
-    
-    # Custom styles
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        textColor=colors.HexColor('#2c3e50'),
-        spaceAfter=30,
-        alignment=TA_CENTER
-    )
-    
-    heading_style = ParagraphStyle(
-        'CustomHeading',
-        parent=styles['Heading2'],
-        fontSize=14,
-        textColor=colors.HexColor('#34495e'),
-        spaceAfter=12,
-        spaceBefore=12
-    )
-    
-    # Title
-    title_text = {
-        'seller': 'Seller Sales Report',
-        'admin': 'Admin Sales Report',
-        'courier': 'Courier Earnings Report',
-        'rider': 'Rider Earnings Report'
-    }.get(report_type, 'Sales Report')
-    
-    elements.append(Paragraph(title_text, title_style))
-    elements.append(Spacer(1, 12))
-    
-    # Report metadata
-    metadata = [
-        ['Report Generated:', datetime.now().strftime('%B %d, %Y at %I:%M %p')],
-        ['Report Period:', report_data.get('period', 'All Time')],
-        ['Generated By:', report_data.get('user_name', 'System')],
-    ]
-    
-    if 'shop_name' in report_data:
-        metadata.insert(1, ['Shop Name:', report_data['shop_name']])
-    
-    meta_table = Table(metadata, colWidths=[2*inch, 4*inch])
-    meta_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-    ]))
-    elements.append(meta_table)
-    elements.append(Spacer(1, 20))
-    
-    # Summary section
-    elements.append(Paragraph('Summary', heading_style))
-    
-    summary_data = []
-    if report_type == 'seller':
-        summary_data = [
-            ['Metric', 'Value'],
-            ['Total Orders', str(report_data.get('total_orders', 0))],
-            ['Delivered Orders', str(report_data.get('delivered_orders', 0))],
-            ['Total Sales (Before Commission)', f"₱{report_data.get('total_sales', 0):.2f}"],
-            ['Admin Commission (5%)', f"₱{report_data.get('total_commission', 0):.2f}"],
-            ['Your Earnings (95%)', f"₱{report_data.get('total_earnings', 0):.2f}"],
-        ]
-    elif report_type == 'admin':
-        summary_data = [
-            ['Metric', 'Value'],
-            ['Total Orders', str(report_data.get('total_orders', 0))],
-            ['Delivered Orders', str(report_data.get('delivered_orders', 0))],
-            ['Total Revenue', f"₱{report_data.get('total_revenue', 0):.2f}"],
-            ['Commission Received', f"₱{report_data.get('commission_received', 0):.2f}"],
-            ['Commission Pending', f"₱{report_data.get('commission_pending', 0):.2f}"],
-        ]
-    elif report_type in ['courier', 'rider']:
-        summary_data = [
-            ['Metric', 'Value'],
-            ['Total Deliveries', str(report_data.get('total_deliveries', 0))],
-            ['Pending Deliveries', str(report_data.get('pending_deliveries', 0))],
-            ['Total Earnings', f"₱{report_data.get('total_earnings', 0):.2f}"],
-            ['Pending Earnings', f"₱{report_data.get('pending_earnings', 0):.2f}"],
-        ]
-    
-    summary_table = Table(summary_data, colWidths=[3*inch, 3*inch])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-    ]))
-    elements.append(summary_table)
-    elements.append(Spacer(1, 20))
-    
-    # Orders/Deliveries details
-    if 'orders' in report_data and report_data['orders']:
-        elements.append(Paragraph('Detailed Transactions', heading_style))
-        
-        orders = report_data['orders']
-        order_data = [['Order #', 'Date', 'Customer', 'Amount', 'Status']]
-        
-        for order in orders[:50]:  # Limit to 50 orders to avoid huge PDFs
-            order_data.append([
-                order.get('order_number', 'N/A'),
-                order.get('date', 'N/A'),
-                order.get('customer_name', 'N/A'),
-                f"₱{order.get('amount', 0):.2f}",
-                order.get('status', 'N/A')
-            ])
-        
-        order_table = Table(order_data, colWidths=[1.5*inch, 1.3*inch, 1.5*inch, 1.2*inch, 1.5*inch])
-        order_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-        ]))
-        elements.append(order_table)
-    
-    # Build PDF
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
 
 
 @app.context_processor
@@ -983,7 +806,7 @@ def view_cart():
     
     # Get all cart items for this user (each entry is a separate transaction)
     cart_items_db = CartItem.query.filter_by(user_id=user_id).order_by(CartItem.created_at.desc()).all()
-    
+     
     cart_items = []
     total = 0
     has_stock_error = False
@@ -1921,78 +1744,6 @@ def seller_sales_report():
     )
 
 
-@app.route('/seller/sales-report/export-pdf')
-@login_required
-@role_required('seller')
-def seller_sales_report_export_pdf():
-    """Export seller sales report as PDF"""
-    user = User.query.get(session['user_id'])
-    
-    if not user.shop:
-        flash('You need to create a shop first.', 'warning')
-        return redirect(url_for('create_shop'))
-    
-    # Get filter parameters
-    status_filter = request.args.get('status', 'all')
-    
-    # Build query
-    query = Order.query.filter_by(shop_id=user.shop.id)
-    
-    if status_filter != 'all':
-        query = query.filter_by(status=status_filter)
-    
-    # Get all orders (not paginated for PDF)
-    orders = query.order_by(Order.created_at.desc()).limit(100).all()
-    
-    # Calculate totals
-    total_orders = query.count()
-    delivered_orders = Order.query.filter_by(shop_id=user.shop.id, status='DELIVERED').count()
-    
-    # Revenue summary
-    total_sales = db.session.query(func.sum(Order.subtotal))\
-        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
-    total_commission = db.session.query(func.sum(Order.commission_amount))\
-        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
-    total_earnings = db.session.query(func.sum(Order.seller_amount))\
-        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
-    
-    # Format orders for PDF
-    orders_data = []
-    for order in orders:
-        orders_data.append({
-            'order_number': order.order_number,
-            'date': order.created_at.strftime('%Y-%m-%d %H:%M'),
-            'customer_name': order.customer.full_name or order.customer.email,
-            'amount': float(order.subtotal),
-            'status': order.status
-        })
-    
-    # Prepare report data
-    report_data = {
-        'user_name': user.full_name or user.email,
-        'shop_name': user.shop.name,
-        'period': f"Status: {status_filter.upper()}" if status_filter != 'all' else 'All Orders',
-        'total_orders': total_orders,
-        'delivered_orders': delivered_orders,
-        'total_sales': float(total_sales),
-        'total_commission': float(total_commission),
-        'total_earnings': float(total_earnings),
-        'orders': orders_data
-    }
-    
-    # Generate PDF
-    pdf_buffer = generate_sales_report_pdf(report_data, report_type='seller')
-    
-    # Create response
-    response = make_response(pdf_buffer.getvalue())
-    response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename=sales_report_{user.shop.name.replace(" ", "_")}_{datetime.now().strftime("%Y%m%d")}.pdf'
-    
-    log_action('SALES_REPORT_EXPORTED', 'Report', user.shop.id, 'Seller sales report PDF exported')
-    
-    return response
-
-
 @app.route('/seller/shop/create', methods=['GET', 'POST'])
 @login_required
 @role_required('seller')
@@ -2168,10 +1919,7 @@ def seller_order_detail(order_id):
     if order.status == 'READY_FOR_PICKUP' and order.pickup_token:
         qr_data = generate_qr_code(order.pickup_token)
     
-    # Get available couriers
-    couriers = User.query.filter_by(role='courier', is_approved=True, is_suspended=False).all()
-    
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data, couriers=couriers)
+    return render_template('seller_order_detail.html', order=order, qr_data=qr_data)
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
@@ -2189,15 +1937,6 @@ def mark_order_ready(order_id):
         flash('Order cannot be marked as ready.', 'warning')
         return redirect(url_for('seller_order_detail', order_id=order_id))
     
-    # Get selected courier if provided
-    courier_id = request.form.get('courier_id')
-    if courier_id and courier_id != '':
-        courier = User.query.get(int(courier_id))
-        if courier and courier.role == 'courier':
-            order.courier_id = courier.id
-            # Calculate courier earnings (60% of delivery fee)
-            order.courier_earnings = order.delivery_fee * Decimal('0.60')
-    
     # Generate pickup token for courier
     order.pickup_token = generate_qr_token(order.id, 'pickup')
     order.status = 'READY_FOR_PICKUP'
@@ -2212,18 +1951,7 @@ def mark_order_ready(order_id):
         f'Your order {order.order_number} is ready for pickup!'
     )
     
-    # Notify selected courier if assigned
-    if order.courier_id:
-        courier = User.query.get(order.courier_id)
-        send_email(
-            courier.email,
-            'New Pickup Assignment',
-            f'You have been assigned to pickup order {order.order_number}. Please coordinate with the seller.'
-        )
-        flash(f'Order marked as ready and assigned to {courier.full_name or courier.email}!', 'success')
-    else:
-        flash('Order marked as ready for pickup!', 'success')
-    
+    flash('Order marked as ready for pickup!', 'success')
     return redirect(url_for('seller_order_detail', order_id=order_id))
 
 
@@ -2281,65 +2009,6 @@ def courier_dashboard():
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
     )
-
-
-@app.route('/courier/earnings-report/export-pdf')
-@login_required
-@role_required('courier')
-def courier_earnings_report_export_pdf():
-    """Export courier earnings report as PDF"""
-    from sqlalchemy import func
-    user = User.query.get(session['user_id'])
-    
-    # Get all delivered orders
-    delivered_orders = Order.query.filter_by(courier_id=user.id, status='DELIVERED')\
-        .order_by(Order.created_at.desc()).limit(100).all()
-    
-    # Earnings statistics
-    total_deliveries = Order.query.filter_by(courier_id=user.id, status='DELIVERED').count()
-    pending_deliveries = Order.query.filter_by(courier_id=user.id)\
-        .filter(Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'])).count()
-    
-    total_earnings = db.session.query(func.sum(Order.courier_earnings))\
-        .filter(Order.courier_id == user.id, Order.status == 'DELIVERED').scalar() or Decimal('0')
-    
-    pending_earnings = db.session.query(func.sum(Order.courier_earnings))\
-        .filter(Order.courier_id == user.id, 
-                Order.status.in_(['READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'])).scalar() or Decimal('0')
-    
-    # Format orders for PDF
-    orders_data = []
-    for order in delivered_orders:
-        orders_data.append({
-            'order_number': order.order_number,
-            'date': order.created_at.strftime('%Y-%m-%d %H:%M'),
-            'customer_name': order.customer.full_name or order.customer.email,
-            'amount': float(order.courier_earnings),
-            'status': order.status
-        })
-    
-    # Prepare report data
-    report_data = {
-        'user_name': user.full_name or user.email,
-        'period': 'All Completed Deliveries',
-        'total_deliveries': total_deliveries,
-        'pending_deliveries': pending_deliveries,
-        'total_earnings': float(total_earnings),
-        'pending_earnings': float(pending_earnings),
-        'orders': orders_data
-    }
-    
-    # Generate PDF
-    pdf_buffer = generate_sales_report_pdf(report_data, report_type='courier')
-    
-    # Create response
-    response = make_response(pdf_buffer.getvalue())
-    response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename=courier_earnings_report_{datetime.now().strftime("%Y%m%d")}.pdf'
-    
-    log_action('EARNINGS_REPORT_EXPORTED', 'Report', user.id, 'Courier earnings report PDF exported')
-    
-    return response
 
 
 @app.route('/courier/pickup-manifest')
@@ -2462,63 +2131,6 @@ def rider_dashboard():
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
     )
-
-
-@app.route('/rider/earnings-report/export-pdf')
-@login_required
-@role_required('rider')
-def rider_earnings_report_export_pdf():
-    """Export rider earnings report as PDF"""
-    from sqlalchemy import func
-    user = User.query.get(session['user_id'])
-    
-    # Get all delivered orders
-    delivered_orders = Order.query.filter_by(rider_id=user.id, status='DELIVERED')\
-        .order_by(Order.created_at.desc()).limit(100).all()
-    
-    # Earnings statistics
-    total_deliveries = Order.query.filter_by(rider_id=user.id, status='DELIVERED').count()
-    pending_deliveries = Order.query.filter_by(rider_id=user.id, status='OUT_FOR_DELIVERY').count()
-    
-    total_earnings = db.session.query(func.sum(Order.rider_earnings))\
-        .filter(Order.rider_id == user.id, Order.status == 'DELIVERED').scalar() or Decimal('0')
-    
-    pending_earnings = db.session.query(func.sum(Order.rider_earnings))\
-        .filter(Order.rider_id == user.id, Order.status == 'OUT_FOR_DELIVERY').scalar() or Decimal('0')
-    
-    # Format orders for PDF
-    orders_data = []
-    for order in delivered_orders:
-        orders_data.append({
-            'order_number': order.order_number,
-            'date': order.created_at.strftime('%Y-%m-%d %H:%M'),
-            'customer_name': order.customer.full_name or order.customer.email,
-            'amount': float(order.rider_earnings),
-            'status': order.status
-        })
-    
-    # Prepare report data
-    report_data = {
-        'user_name': user.full_name or user.email,
-        'period': 'All Completed Deliveries',
-        'total_deliveries': total_deliveries,
-        'pending_deliveries': pending_deliveries,
-        'total_earnings': float(total_earnings),
-        'pending_earnings': float(pending_earnings),
-        'orders': orders_data
-    }
-    
-    # Generate PDF
-    pdf_buffer = generate_sales_report_pdf(report_data, report_type='rider')
-    
-    # Create response
-    response = make_response(pdf_buffer.getvalue())
-    response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename=rider_earnings_report_{datetime.now().strftime("%Y%m%d")}.pdf'
-    
-    log_action('EARNINGS_REPORT_EXPORTED', 'Report', user.id, 'Rider earnings report PDF exported')
-    
-    return response
 
 
 @app.route('/rider/delivery-manifest')
@@ -2794,131 +2406,6 @@ def admin_dashboard():
         end_date=end_date_str,
         recent_logs=recent_logs
     )
-
-
-@app.route('/admin/sales-report/export-pdf')
-@login_required
-@role_required('admin')
-def admin_sales_report_export_pdf():
-    """Export admin sales report as PDF"""
-    from sqlalchemy import func
-    from datetime import datetime, timedelta
-    
-    user = User.query.get(session['user_id'])
-    
-    # Get filter parameters
-    time_filter = request.args.get('filter', 'all')
-    start_date_str = request.args.get('start_date')
-    end_date_str = request.args.get('end_date')
-    
-    # Parse custom date range if provided
-    now = datetime.utcnow()
-    start_date = None
-    end_date = None
-    
-    if start_date_str and end_date_str:
-        try:
-            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
-            time_filter = 'custom'
-        except ValueError:
-            pass
-    
-    # Calculate date range based on predefined filter if no custom range
-    if not start_date and not end_date:
-        if time_filter == 'day':
-            start_date = now - timedelta(days=1)
-        elif time_filter == 'week':
-            start_date = now - timedelta(weeks=1)
-        elif time_filter == 'month':
-            start_date = now - timedelta(days=30)
-        elif time_filter == 'year':
-            start_date = now - timedelta(days=365)
-    
-    # Get delivered orders for the period
-    order_query = Order.query.filter_by(status='DELIVERED')
-    if start_date:
-        order_query = order_query.filter(Order.created_at >= start_date)
-    if end_date:
-        order_query = order_query.filter(Order.created_at <= end_date)
-    
-    orders = order_query.order_by(Order.created_at.desc()).limit(100).all()
-    
-    # Statistics
-    total_orders = Order.query.count()
-    delivered_orders = order_query.count()
-    
-    # Revenue and commission tracking
-    total_revenue = db.session.query(func.sum(Order.total_amount))\
-        .filter(Order.status == 'DELIVERED')
-    if start_date:
-        total_revenue = total_revenue.filter(Order.created_at >= start_date)
-    if end_date:
-        total_revenue = total_revenue.filter(Order.created_at <= end_date)
-    total_revenue = total_revenue.scalar() or 0
-    
-    commission_received = db.session.query(func.sum(Order.commission_amount))\
-        .filter(Order.status == 'DELIVERED')
-    if start_date:
-        commission_received = commission_received.filter(Order.created_at >= start_date)
-    if end_date:
-        commission_received = commission_received.filter(Order.created_at <= end_date)
-    commission_received = commission_received.scalar() or 0
-    
-    commission_pending = db.session.query(func.sum(Order.commission_amount))\
-        .filter(Order.status.in_(['PENDING_PAYMENT', 'READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER', 'OUT_FOR_DELIVERY']))
-    if start_date:
-        commission_pending = commission_pending.filter(Order.created_at >= start_date)
-    if end_date:
-        commission_pending = commission_pending.filter(Order.created_at <= end_date)
-    commission_pending = commission_pending.scalar() or 0
-    
-    # Format orders for PDF
-    orders_data = []
-    for order in orders:
-        orders_data.append({
-            'order_number': order.order_number,
-            'date': order.created_at.strftime('%Y-%m-%d %H:%M'),
-            'customer_name': order.customer.full_name or order.customer.email,
-            'amount': float(order.total_amount),
-            'status': order.status
-        })
-    
-    # Determine period string
-    period_str = {
-        'day': 'Last 24 Hours',
-        'week': 'Last Week',
-        'month': 'Last Month',
-        'year': 'Last Year',
-        'all': 'All Time'
-    }.get(time_filter, 'All Time')
-    
-    if time_filter == 'custom' and start_date_str and end_date_str:
-        period_str = f"{start_date_str} to {end_date_str}"
-    
-    # Prepare report data
-    report_data = {
-        'user_name': user.full_name or user.email,
-        'period': period_str,
-        'total_orders': total_orders,
-        'delivered_orders': delivered_orders,
-        'total_revenue': float(total_revenue),
-        'commission_received': float(commission_received),
-        'commission_pending': float(commission_pending),
-        'orders': orders_data
-    }
-    
-    # Generate PDF
-    pdf_buffer = generate_sales_report_pdf(report_data, report_type='admin')
-    
-    # Create response
-    response = make_response(pdf_buffer.getvalue())
-    response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename=admin_sales_report_{datetime.now().strftime("%Y%m%d")}.pdf'
-    
-    log_action('SALES_REPORT_EXPORTED', 'Report', user.id, 'Admin sales report PDF exported')
-    
-    return response
 
 
 @app.route('/admin/approvals')
@@ -3350,11 +2837,8 @@ def view_conversation(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization - allow admins to view any conversation
-    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
-    is_admin = user.role == 'admin'
-    
-    if not (is_participant or is_admin):
+    # Check authorization
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('messages_inbox'))
     
@@ -3369,16 +2853,11 @@ def view_conversation(conversation_id):
     messages = Message.query.filter_by(conversation_id=conversation_id)\
         .order_by(Message.created_at.asc()).all()
     
-    # Update user last activity
-    user.last_activity = datetime.utcnow()
-    db.session.commit()
-    
     return render_template('conversation.html',
         conversation=conversation,
         messages=messages,
-        is_admin_viewing=(is_admin and not is_participant),
-        now=datetime.utcnow,
-        timedelta=timedelta
+        now=datetime.utcnow(),  # ← Make sure this is calling the function with ()
+        timedelta=timedelta      # ← Add this for date calculations in template
     )
 
 
@@ -3388,51 +2867,22 @@ def send_message(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization - allow admins to send messages in any conversation
-    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
-    is_admin = user.role == 'admin'
-    
-    if not (is_participant or is_admin):
+    # Check authorization
+    if user.id not in [conversation.user1_id, conversation.user2_id]:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
     message_text = request.form.get('message_text', '').strip()
-    image_file = request.files.get('image')
-    
-    # Require either text or image
-    if not message_text and not image_file:
+    print("DEBUG received message_text =", message_text)
+    if not message_text:
         return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
     
-    # Handle image upload if present
-    image_filename = None
-    if image_file and image_file.filename:
-        # Check file extension
-        allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-        file_ext = image_file.filename.rsplit('.', 1)[1].lower() if '.' in image_file.filename else ''
-        
-        if file_ext not in allowed_extensions:
-            return jsonify({'success': False, 'message': 'Invalid image format. Allowed: png, jpg, jpeg, gif, webp'}), 400
-        
-        # Generate unique filename
-        import uuid
-        image_filename = f"chat_{uuid.uuid4().hex}.{file_ext}"
-        
-        # Save image
-        upload_folder = os.path.join(app.root_path, 'static', 'uploads')
-        os.makedirs(upload_folder, exist_ok=True)
-        image_file.save(os.path.join(upload_folder, image_filename))
-    
-    # Create message
     message = Message(
         conversation_id=conversation_id,
         sender_id=user.id,
-        message_text=message_text if message_text else None,
-        image=image_filename
+        message_text=message_text
     )
     
     conversation.last_message_at = datetime.utcnow()
-    
-    # Update user last activity
-    user.last_activity = datetime.utcnow()
     
     db.session.add(message)
     db.session.commit()
@@ -3443,9 +2893,8 @@ def send_message(conversation_id):
         'success': True,
         'message': {
             'id': message.id,
-            'sender_name': user.full_name or user.email,
+            'sender_name': user.full_name,
             'message_text': message.message_text,
-            'image': image_filename,
             'created_at': message.created_at.strftime('%I:%M %p'),
             'is_own': True
         }
@@ -3551,26 +3000,26 @@ def start_conversation_with_courier(order_id):
     user = User.query.get(session['user_id'])
     order = Order.query.get_or_404(order_id)
     
-    # Check authorization - customer, seller, or courier can participate
-    if user.role not in ['customer', 'seller', 'courier']:
+    # Check authorization - only buyer or seller can message courier
+    if user.role not in ['buyer', 'seller'] and user.id != order.courier_id:
         flash('You are not authorized to view this conversation.', 'danger')
         return redirect(url_for('index'))
     
     # Check if order has a courier assigned
     if not order.courier_id:
         flash('No courier has been assigned to this order yet.', 'warning')
-        return redirect(url_for('customer_order_detail' if user.role == 'customer' else 'seller_order_detail', order_id=order_id))
+        return redirect(url_for('order_details', order_id=order_id))
     
     courier = User.query.get(order.courier_id)
     
     # Determine conversation type based on who is initiating
-    if user.role == 'customer':
+    if user.role == 'buyer':
         conv_type = 'buyer_courier'
         user1_id = user.id
         user2_id = courier.id
     elif user.role == 'seller':
         conv_type = 'seller_courier'
-        user1_id = order.shop.seller_id
+        user1_id = order.seller_id
         user2_id = courier.id
     else:  # User is the courier
         # Find existing conversation
@@ -3978,112 +3427,6 @@ def admin_support_conversations():
     )
 
 
-@app.route('/admin/start-conversation/<int:user_id>', methods=['POST'])
-@login_required
-@role_required('admin')
-def admin_start_conversation(user_id):
-    """Admin initiates a conversation with any user"""
-    admin = User.query.get(session['user_id'])
-    target_user = User.query.get_or_404(user_id)
-    
-    # Determine conversation type based on target user's role
-    conv_type_map = {
-        'customer': 'admin_customer',
-        'seller': 'admin_seller',
-        'courier': 'admin_courier',
-        'rider': 'admin_rider',
-        'admin': 'user_admin'  # Admin to admin conversation
-    }
-    
-    conv_type = conv_type_map.get(target_user.role, 'user_admin')
-    
-    # Check if conversation already exists
-    existing = Conversation.query.filter(
-        db.or_(
-            db.and_(Conversation.user1_id == admin.id, Conversation.user2_id == target_user.id),
-            db.and_(Conversation.user1_id == target_user.id, Conversation.user2_id == admin.id)
-        ),
-        Conversation.conversation_type == conv_type
-    ).first()
-    
-    if existing:
-        return redirect(url_for('view_conversation', conversation_id=existing.id))
-    
-    # Create new conversation
-    conversation = Conversation(
-        user1_id=admin.id,
-        user2_id=target_user.id,
-        conversation_type=conv_type
-    )
-    
-    db.session.add(conversation)
-    db.session.commit()
-    
-    log_action('ADMIN_CONVERSATION_STARTED', 'Conversation', conversation.id, 
-              f'Admin started conversation with {target_user.role} {target_user.full_name or target_user.email}')
-    
-    flash(f'Conversation started with {target_user.full_name or target_user.email}', 'success')
-    return redirect(url_for('view_conversation', conversation_id=conversation.id))
-
-
-@app.route('/admin/start-conversation-order/<int:order_id>', methods=['POST'])
-@login_required
-@role_required('admin')
-def admin_start_conversation_order(order_id):
-    """Admin initiates a conversation about a specific order"""
-    admin = User.query.get(session['user_id'])
-    order = Order.query.get_or_404(order_id)
-    
-    # Get target user from query parameter
-    target_role = request.form.get('target_role')  # 'customer', 'seller', 'courier', or 'rider'
-    
-    if target_role == 'customer':
-        target_user = order.customer
-        conv_type = 'admin_customer'
-    elif target_role == 'seller':
-        target_user = order.shop.owner
-        conv_type = 'admin_seller'
-    elif target_role == 'courier' and order.courier_id:
-        target_user = order.courier
-        conv_type = 'admin_courier'
-    elif target_role == 'rider' and order.rider_id:
-        target_user = order.rider
-        conv_type = 'admin_rider'
-    else:
-        flash('Invalid target user or user not assigned to this order.', 'danger')
-        return redirect(url_for('admin_orders'))
-    
-    # Check if conversation already exists for this order
-    existing = Conversation.query.filter(
-        Conversation.order_id == order_id,
-        db.or_(
-            db.and_(Conversation.user1_id == admin.id, Conversation.user2_id == target_user.id),
-            db.and_(Conversation.user1_id == target_user.id, Conversation.user2_id == admin.id)
-        ),
-        Conversation.conversation_type == conv_type
-    ).first()
-    
-    if existing:
-        return redirect(url_for('view_conversation', conversation_id=existing.id))
-    
-    # Create new conversation
-    conversation = Conversation(
-        user1_id=admin.id,
-        user2_id=target_user.id,
-        order_id=order_id,
-        conversation_type=conv_type
-    )
-    
-    db.session.add(conversation)
-    db.session.commit()
-    
-    log_action('ADMIN_ORDER_CONVERSATION_STARTED', 'Conversation', conversation.id, 
-              f'Admin started conversation about order {order.order_number} with {target_role}')
-    
-    flash(f'Conversation started with {target_role} about order {order.order_number}', 'success')
-    return redirect(url_for('view_conversation', conversation_id=conversation.id))
-
-
 @app.route('/admin/logs')
 @login_required
 @role_required('admin')
@@ -4172,253 +3515,6 @@ def api_verify_qr():
         'status': order.status,
         'type': payload['type']
     })
-
-
-# ==================== WITHDRAWAL REQUEST ROUTES ====================
-
-@app.route('/withdrawal/request', methods=['GET', 'POST'])
-@login_required
-def withdrawal_request():
-    """Handle withdrawal request form for sellers, couriers, riders, and admins"""
-    from sqlalchemy import func
-    
-    user = User.query.get(session['user_id'])
-    
-    # Check if user is eligible for withdrawals
-    if user.role not in ['seller', 'courier', 'rider', 'admin']:
-        flash('You are not authorized to make withdrawal requests.', 'danger')
-        return redirect(url_for('index'))
-    
-    # Calculate available balance based on user role
-    available_balance = 0
-    if user.role == 'seller':
-        if not user.shop:
-            flash('You need to create a shop before requesting withdrawals.', 'warning')
-            return redirect(url_for('create_shop'))
-        # Sum of seller_amount from delivered orders minus pending/completed withdrawals
-        total_earnings = db.session.query(func.sum(Order.seller_amount))\
-            .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-        
-    elif user.role == 'courier':
-        # Sum of courier_earnings from delivered orders minus withdrawals
-        total_earnings = db.session.query(func.sum(Order.courier_earnings))\
-            .filter(Order.courier_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-        
-    elif user.role == 'rider':
-        # Sum of rider_earnings from delivered orders minus withdrawals
-        total_earnings = db.session.query(func.sum(Order.rider_earnings))\
-            .filter(Order.rider_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-        
-    elif user.role == 'admin':
-        # Admins can see total commission earnings
-        total_earnings = db.session.query(func.sum(Order.commission_amount))\
-            .filter(Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    
-    if request.method == 'POST':
-        amount = request.form.get('amount', type=float)
-        payout_method = request.form.get('payout_method')
-        account_name = request.form.get('account_name')
-        account_number = request.form.get('account_number')
-        notes = request.form.get('notes', '')
-        
-        # Validation
-        errors = []
-        if not amount or amount <= 0:
-            errors.append('Please enter a valid amount.')
-        elif amount < 100:
-            errors.append('Minimum withdrawal amount is ₱100.00')
-        elif amount > available_balance:
-            errors.append(f'Insufficient balance. Available: ₱{available_balance:.2f}')
-        
-        if not payout_method:
-            errors.append('Please select a payout method.')
-        if not account_name or len(account_name.strip()) < 3:
-            errors.append('Please enter a valid account name.')
-        if not account_number or len(account_number.strip()) < 5:
-            errors.append('Please enter a valid account number.')
-        
-        if errors:
-            for error in errors:
-                flash(error, 'danger')
-        else:
-            # Create withdrawal request
-            # Admin withdrawals are automatically completed, others are pending
-            withdrawal_status = 'completed' if user.role == 'admin' else 'pending'
-            
-            withdrawal = WithdrawalRequest(
-                user_id=user.id,
-                amount=amount,
-                payout_method=payout_method,
-                account_name=account_name.strip(),
-                account_number=account_number.strip(),
-                notes=notes.strip() if notes else None,
-                status=withdrawal_status
-            )
-            
-            # If admin, set processed_by and processed_at automatically
-            if user.role == 'admin':
-                withdrawal.processed_by = user.id
-                withdrawal.processed_at = datetime.utcnow()
-            
-            db.session.add(withdrawal)
-            db.session.commit()
-            
-            # Different messages for admin vs other roles
-            if user.role == 'admin':
-                flash(f'Withdrawal request for ₱{amount:.2f} completed successfully! Your commission has been processed.', 'success')
-            else:
-                flash(f'Withdrawal request for ₱{amount:.2f} submitted successfully! It will be processed within 1-3 business days.', 'success')
-            
-            return redirect(url_for('withdrawal_history'))
-    
-    return render_template('withdrawal_request.html', 
-                         user=user, 
-                         available_balance=available_balance)
-
-
-@app.route('/withdrawal/history')
-@login_required
-def withdrawal_history():
-    """Display withdrawal history for the current user"""
-    from sqlalchemy import func
-    
-    user = User.query.get(session['user_id'])
-    
-    # Check if user is eligible for withdrawals
-    if user.role not in ['seller', 'courier', 'rider', 'admin']:
-        flash('You are not authorized to view withdrawal history.', 'danger')
-        return redirect(url_for('index'))
-    
-    # Get withdrawal requests
-    withdrawals = WithdrawalRequest.query.filter_by(user_id=user.id)\
-        .order_by(WithdrawalRequest.created_at.desc()).all()
-    
-    # Calculate statistics
-    total_withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-        .filter(WithdrawalRequest.user_id == user.id, 
-               WithdrawalRequest.status == 'completed').scalar() or 0
-    
-    pending_amount = db.session.query(func.sum(WithdrawalRequest.amount))\
-        .filter(WithdrawalRequest.user_id == user.id, 
-               WithdrawalRequest.status.in_(['pending', 'processing'])).scalar() or 0
-    
-    # Calculate available balance
-    available_balance = 0
-    if user.role == 'seller' and user.shop:
-        total_earnings = db.session.query(func.sum(Order.seller_amount))\
-            .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    elif user.role == 'courier':
-        total_earnings = db.session.query(func.sum(Order.courier_earnings))\
-            .filter(Order.courier_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    elif user.role == 'rider':
-        total_earnings = db.session.query(func.sum(Order.rider_earnings))\
-            .filter(Order.rider_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    elif user.role == 'admin':
-        total_earnings = db.session.query(func.sum(Order.commission_amount))\
-            .filter(Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    
-    return render_template('withdrawal_history.html',
-                         user=user,
-                         withdrawals=withdrawals,
-                         total_withdrawn=float(total_withdrawn),
-                         pending_amount=float(pending_amount),
-                         available_balance=available_balance)
-
-
-@app.route('/admin/withdrawals')
-@login_required
-@role_required('admin')
-def admin_withdrawals():
-    """Admin view of all withdrawal requests"""
-    from sqlalchemy import func
-    
-    status_filter = request.args.get('status', 'all')
-    
-    # Build query
-    query = WithdrawalRequest.query
-    if status_filter != 'all':
-        query = query.filter_by(status=status_filter)
-    
-    withdrawals = query.order_by(WithdrawalRequest.created_at.desc()).all()
-    
-    # Statistics
-    total_pending = WithdrawalRequest.query.filter_by(status='pending').count()
-    total_processing = WithdrawalRequest.query.filter_by(status='processing').count()
-    total_completed = WithdrawalRequest.query.filter_by(status='completed').count()
-    
-    pending_amount = db.session.query(func.sum(WithdrawalRequest.amount))\
-        .filter(WithdrawalRequest.status == 'pending').scalar() or 0
-    
-    return render_template('admin_withdrawals.html',
-                         withdrawals=withdrawals,
-                         status_filter=status_filter,
-                         total_pending=total_pending,
-                         total_processing=total_processing,
-                         total_completed=total_completed,
-                         pending_amount=float(pending_amount))
-
-
-@app.route('/admin/withdrawals/<int:withdrawal_id>/update', methods=['POST'])
-@login_required
-@role_required('admin')
-def admin_update_withdrawal(withdrawal_id):
-    """Admin updates withdrawal status"""
-    withdrawal = WithdrawalRequest.query.get_or_404(withdrawal_id)
-    
-    new_status = request.form.get('status')
-    rejection_reason = request.form.get('rejection_reason', '')
-    
-    if new_status not in ['pending', 'processing', 'completed', 'rejected']:
-        flash('Invalid status.', 'danger')
-        return redirect(url_for('admin_withdrawals'))
-    
-    old_status = withdrawal.status
-    withdrawal.status = new_status
-    withdrawal.processed_by = session['user_id']
-    withdrawal.processed_at = datetime.utcnow()
-    
-    if new_status == 'rejected' and rejection_reason:
-        withdrawal.rejection_reason = rejection_reason
-    
-    db.session.commit()
-    
-    log_action('WITHDRAWAL_STATUS_UPDATED', 'WithdrawalRequest', withdrawal_id,
-              f'Status: {old_status} → {new_status}')
-    
-    flash(f'Withdrawal request #{withdrawal_id} updated to {new_status}.', 'success')
-    return redirect(url_for('admin_withdrawals'))
 
 
 # ==================== INITIALIZE DATABASE ====================
