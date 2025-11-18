@@ -2865,70 +2865,89 @@ def view_conversation(conversation_id):
 @app.route('/messages/send/<int:conversation_id>', methods=['POST'])
 @login_required
 def send_message(conversation_id):
-    conversation = Conversation.query.get_or_404(conversation_id)
-    user = User.query.get(session['user_id'])
-    
-    # Check authorization - allow admins to send messages in any conversation
-    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
-    is_admin = user.role == 'admin'
-    
-    if not (is_participant or is_admin):
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
-    
-    message_text = request.form.get('message_text', '').strip()
-    image_file = request.files.get('image')
-    
-    # Require either text or image
-    if not message_text and not image_file:
-        return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
-    
-    # Handle image upload if present
-    image_filename = None
-    if image_file and image_file.filename:
-        # Check file extension
-        allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-        file_ext = image_file.filename.rsplit('.', 1)[1].lower() if '.' in image_file.filename else ''
+    try:
+        print(f"DEBUG: send_message called for conversation {conversation_id}")
+        conversation = Conversation.query.get_or_404(conversation_id)
+        user = User.query.get(session['user_id'])
+        print(f"DEBUG: User {user.id} sending message")
         
-        if file_ext not in allowed_extensions:
-            return jsonify({'success': False, 'message': 'Invalid image format. Allowed: png, jpg, jpeg, gif, webp'}), 400
+        # Check authorization - allow admins to send messages in any conversation
+        is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+        is_admin = user.role == 'admin'
         
-        # Generate unique filename
-        image_filename = f"chat_{uuid.uuid4().hex}.{file_ext}"
+        if not (is_participant or is_admin):
+            print("DEBUG: Unauthorized user")
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 403
         
-        # Save image
-        upload_folder = os.path.join(app.root_path, 'static', 'uploads')
-        os.makedirs(upload_folder, exist_ok=True)
-        image_file.save(os.path.join(upload_folder, image_filename))
-    
-    # Create message
-    message = Message(
-        conversation_id=conversation_id,
-        sender_id=user.id,
-        message_text=message_text if message_text else None,
-        image=image_filename
-    )
-    
-    conversation.last_message_at = datetime.utcnow()
-    
-    # Update user last activity
-    user.last_activity = datetime.utcnow()
-    
-    db.session.add(message)
-    db.session.commit()
-    
-    log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
-    
-    return jsonify({
-        'success': True,
-        'message': {
-            'id': message.id,
-            'sender_name': user.full_name or user.email,
-            'message_text': message.message_text,
-            'image': image_filename,
-            'created_at': message.created_at.strftime('%I:%M %p'),
-            'is_own': True
+        message_text = request.form.get('message_text', '').strip()
+        image_file = request.files.get('image')
+        print(f"DEBUG: Text='{message_text}', Image file={image_file is not None}")
+        
+        # Require either text or image
+        if not message_text and not image_file:
+            print("DEBUG: No text and no image")
+            return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
+        
+        # Handle image upload if present
+        image_filename = None
+        if image_file and image_file.filename:
+            print(f"DEBUG: Processing image: {image_file.filename}")
+            # Check file extension
+            allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+            file_ext = image_file.filename.rsplit('.', 1)[1].lower() if '.' in image_file.filename else ''
+            
+            if file_ext not in allowed_extensions:
+                print(f"DEBUG: Invalid extension: {file_ext}")
+                return jsonify({'success': False, 'message': 'Invalid image format. Allowed: png, jpg, jpeg, gif, webp'}), 400
+            
+            # Generate unique filename
+            image_filename = f"chat_{uuid.uuid4().hex}.{file_ext}"
+            print(f"DEBUG: Generated filename: {image_filename}")
+            
+            # Save image
+            upload_folder = os.path.join(app.root_path, 'static', 'uploads')
+            os.makedirs(upload_folder, exist_ok=True)
+            filepath = os.path.join(upload_folder, image_filename)
+            image_file.save(filepath)
+            print(f"DEBUG: Image saved to: {filepath}")
+        
+        # Create message
+        message = Message(
+            conversation_id=conversation_id,
+            sender_id=user.id,
+            message_text=message_text if message_text else None,
+            image=image_filename
+        )
+        
+        conversation.last_message_at = datetime.utcnow()
+        
+        # Update user last activity
+        user.last_activity = datetime.utcnow()
+        
+        db.session.add(message)
+        db.session.commit()
+        print(f"DEBUG: Message {message.id} saved successfully")
+        
+        log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
+        
+        response_data = {
+            'success': True,
+            'message': {
+                'id': message.id,
+                'sender_name': user.full_name or user.email,
+                'message_text': message.message_text,
+                'image': image_filename,
+                'created_at': message.created_at.strftime('%I:%M %p'),
+                'is_own': True
+            }
         }
-    })
+        print(f"DEBUG: Returning response: {response_data}")
+        return jsonify(response_data)
+    except Exception as e:
+        print(f"DEBUG ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
 
 @app.route('/messages/start/<int:shop_id>', methods=['POST'])

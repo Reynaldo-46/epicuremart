@@ -469,12 +469,15 @@
   // Auto-scroll when new message is sent
   function sendMessage(event) {
       event.preventDefault();
+      console.log('SENDING: Starting send process');
 
       const form = event.target;
       const messageInput = document.getElementById('messageInput');
       const imageInput = document.getElementById('imageInput');
       const messageText = messageInput.value.trim();
       const hasImage = imageInput.files.length > 0;
+      
+      console.log('SENDING: Text:', messageText, 'Has Image:', hasImage);
 
       // Require either text or image
       if (!messageText && !hasImage) {
@@ -494,6 +497,8 @@
 
       const formData = new FormData(form);
       const conversationId = {{ conversation.id }};
+      
+      console.log('SENDING: FormData created, conversation:', conversationId);
 
       fetch(`/messages/send/${conversationId}`, {
           method: 'POST',
@@ -503,23 +508,28 @@
           }
       })
       .then(response => {
+          console.log('SENDING: Response received, status:', response.status);
           if (!response.ok) {
               throw new Error(`HTTP error! status: ${response.status}`);
           }
           return response.json();
       })
       .then(data => {
+          console.log('SENDING: Data parsed:', data);
           if (data.success) {
+              console.log('SENDING: Success! Reloading page...');
               // Reload page to show new message with proper formatting
               location.reload();
           } else {
+              console.log('SENDING: Failed:', data.message);
               alert('Failed to send message: ' + (data.message || 'Unknown error'));
               messageInput.disabled = false;
               sendBtn.disabled = false;
+              document.getElementById('uploadProgress').style.display = 'none';
           }
       })
       .catch(error => {
-          console.error('Error:', error);
+          console.error('SENDING: Error caught:', error);
           alert('Failed to send message. Please check your connection and try again.');
           messageInput.disabled = false;
           sendBtn.disabled = false;
