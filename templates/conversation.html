@@ -601,7 +601,7 @@
       setInterval(function() {
           const conversationId = {{ conversation.id }};
 
-          fetch(`/conversation/${conversationId}/check_new?last_id=${lastMessageId}`)
+          fetch(`/messages/check-new/${conversationId}?last_id=${lastMessageId}`)
           .then(response => response.json())
           .then(data => {
               if (data.success && data.messages && data.messages.length > 0) {
@@ -610,9 +610,30 @@
                       const messageDiv = document.createElement('div');
                       messageDiv.className = 'message message-other';
                       messageDiv.dataset.messageId = message.id;
+                      
+                      let messageContent = '';
+                      
+                      // Add image if exists
+                      if (message.image) {
+                          messageContent += `
+                              <div class="message-image mb-2">
+                                  <img src="/static/uploads/${message.image}" 
+                                       alt="Image" 
+                                       class="img-fluid rounded"
+                                       style="max-width: 300px; cursor: pointer;"
+                                       onclick="openImageModal('/static/uploads/${message.image}')">
+                              </div>
+                          `;
+                      }
+                      
+                      // Add text if exists
+                      if (message.message_text) {
+                          messageContent += `<p class="mb-1">${message.message_text}</p>`;
+                      }
+                      
                       messageDiv.innerHTML = `
                           <div class="message-bubble">
-                              <p class="mb-1">${message.message_text}</p>
+                              ${messageContent}
                               <small class="message-time">${message.created_at}</small>
                           </div>
                       `;

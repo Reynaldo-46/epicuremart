@@ -3068,7 +3068,11 @@ def check_new_messages(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Check authorization - allow admins too
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
+    
+    if not (is_participant or is_admin):
         return jsonify({'success': False}), 403
     
     last_message_id = request.args.get('last_id', 0, type=int)
@@ -3082,8 +3086,9 @@ def check_new_messages(conversation_id):
     for msg in new_messages:
         messages_data.append({
             'id': msg.id,
-            'sender_name': msg.sender.full_name,
+            'sender_name': msg.sender.full_name or msg.sender.email,
             'message_text': msg.message_text,
+            'image': msg.image,
             'created_at': msg.created_at.strftime('%I:%M %p'),
             'is_own': msg.sender_id == user.id
         })
