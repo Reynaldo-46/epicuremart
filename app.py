@@ -3600,6 +3600,8 @@ def check_new_messages(conversation_id):
             'id': msg.id,
             'sender_name': msg.sender.full_name,
             'message_text': msg.message_text,
+            'message_type': msg.message_type,
+            'image_url': msg.image_url,
             'created_at': msg.created_at.strftime('%I:%M %p'),
             'is_own': msg.sender_id == user.id
         })

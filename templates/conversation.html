@@ -503,6 +503,8 @@ function sendMessage(event) {
         return;
     }
     
+    console.log('Sending message...', { text: messageText, hasImage: !!imageInput.files[0] });
+    
     // Disable input while sending
     messageInput.disabled = true;
     
@@ -517,12 +519,14 @@ function sendMessage(event) {
         }
     })
     .then(response => {
+        console.log('Response status:', response.status);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         return response.json();
     })
     .then(data => {
+        console.log('Response data:', data);
         if (data.success) {
             // Add message to chat
             const chatMessages = document.getElementById('chatMessages');
@@ -534,6 +538,7 @@ function sendMessage(event) {
             
             // Add image if present
             if (data.message.message_type === 'image' && data.message.image_url) {
+                console.log('Adding image to message:', data.message.image_url);
                 messageContent += `
                     <div class="message-image-container" onclick="openImageModal('/static/uploads/${data.message.image_url}')">
                         <img src="/static/uploads/${data.message.image_url}" class="message-image" alt="Shared image">
@@ -573,13 +578,15 @@ function sendMessage(event) {
             
             // Auto-scroll to new message
             scrollToBottom(true);
+            console.log('Message sent successfully!');
         } else {
+            console.error('Server returned error:', data.message);
             alert('Failed to send message: ' + (data.message || 'Unknown error'));
             messageInput.disabled = false;
         }
     })
     .catch(error => {
-        console.error('Error:', error);
+        console.error('Error sending message:', error);
         alert('Failed to send message. Please check your connection and try again.');
         messageInput.disabled = false;
     });
@@ -620,7 +627,7 @@ function openImageModal(imageUrl) {
     setInterval(function() {
         const conversationId = {{ conversation.id }};
         
-        fetch(`/conversation/${conversationId}/check_new?last_id=${lastMessageId}`)
+        fetch(`/messages/check-new/${conversationId}?last_id=${lastMessageId}`)
         .then(response => response.json())
         .then(data => {
             if (data.success && data.messages && data.messages.length > 0) {
@@ -629,9 +636,29 @@ function openImageModal(imageUrl) {
                     const messageDiv = document.createElement('div');
                     messageDiv.className = 'message message-other';
                     messageDiv.dataset.messageId = message.id;
+                    
+                    let messageContent = '';
+                    
+                    // Add image if present
+                    if (message.message_type === 'image' && message.image_url) {
+                        messageContent += `
+                            <div class="message-image-container" onclick="openImageModal('/static/uploads/${message.image_url}')">
+                                <img src="/static/uploads/${message.image_url}" class="message-image" alt="Shared image">
+                                <div class="image-overlay">
+                                    <i class="fas fa-search-plus"></i>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    // Add text if present and not just [Image]
+                    if (message.message_text && message.message_text !== '[Image]') {
+                        messageContent += `<p class="mb-1">${message.message_text}</p>`;
+                    }
+                    
                     messageDiv.innerHTML = `
                         <div class="message-bubble">
-                            <p class="mb-1">${message.message_text}</p>
+                            ${messageContent}
                             <small class="message-time">${message.created_at}</small>
                         </div>
                     `;
