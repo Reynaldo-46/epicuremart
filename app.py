@@ -2184,7 +2184,10 @@ def seller_order_detail(order_id):
     if order.status == 'READY_FOR_PICKUP' and order.pickup_token:
         qr_data = generate_qr_code(order.pickup_token)
     
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data)
+    # Get available couriers for selection
+    available_couriers = User.query.filter_by(role='courier', is_approved=True).all()
+    
+    return render_template('seller_order_detail.html', order=order, qr_data=qr_data, available_couriers=available_couriers)
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
@@ -2201,6 +2204,43 @@ def mark_order_ready(order_id):
     if order.status != 'PENDING_PAYMENT':
         flash('Order cannot be marked as ready.', 'warning')
         return redirect(url_for('seller_order_detail', order_id=order_id))
+    
+    # Get selected courier if provided
+    courier_id = request.form.get('courier_id')
+    if courier_id and courier_id.strip():
+        try:
+            courier_id = int(courier_id)
+            courier = User.query.filter_by(id=courier_id, role='courier').first()
+            if courier:
+                order.courier_id = courier_id
+                
+                # Create conversation between seller and courier
+                existing_conv = Conversation.query.filter_by(
+                    order_id=order.id,
+                    conversation_type='seller_courier'
+                ).first()
+                
+                if not existing_conv:
+                    conversation = Conversation(
+                        user1_id=user.id,  # Seller
+                        user2_id=courier_id,  # Courier
+                        order_id=order.id,
+                        conversation_type='seller_courier'
+                    )
+                    db.session.add(conversation)
+                    
+                    # Add initial message
+                    initial_message = Message(
+                        conversation_id=conversation.id if conversation.id else None,
+                        sender_id=user.id,
+                        message_text=f"Order {order.order_number} is ready for pickup. Please coordinate pickup time and location."
+                    )
+                    # We'll add the message after conversation is committed
+                    db.session.flush()  # Get conversation ID
+                    initial_message.conversation_id = conversation.id
+                    db.session.add(initial_message)
+        except (ValueError, TypeError):
+            pass
     
     # Generate pickup token for courier
     order.pickup_token = generate_qr_token(order.id, 'pickup')
@@ -3380,26 +3420,28 @@ def start_conversation_with_courier(order_id):
     user = User.query.get(session['user_id'])
     order = Order.query.get_or_404(order_id)
     
-    # Check authorization - only buyer or seller can message courier
-    if user.role not in ['buyer', 'seller'] and user.id != order.courier_id:
+    # Check authorization - only customer, seller, or courier can access
+    if user.role not in ['customer', 'seller'] and user.id != order.courier_id:
         flash('You are not authorized to view this conversation.', 'danger')
         return redirect(url_for('index'))
     
     # Check if order has a courier assigned
     if not order.courier_id:
         flash('No courier has been assigned to this order yet.', 'warning')
-        return redirect(url_for('order_details', order_id=order_id))
+        if user.role == 'seller':
+            return redirect(url_for('seller_order_detail', order_id=order_id))
+        return redirect(url_for('customer_orders'))
     
     courier = User.query.get(order.courier_id)
     
     # Determine conversation type based on who is initiating
-    if user.role == 'buyer':
+    if user.role == 'customer':
         conv_type = 'buyer_courier'
         user1_id = user.id
         user2_id = courier.id
     elif user.role == 'seller':
         conv_type = 'seller_courier'
-        user1_id = order.seller_id
+        user1_id = user.id
         user2_id = courier.id
     else:  # User is the courier
         # Find existing conversation
@@ -3439,6 +3481,14 @@ def start_conversation_with_courier(order_id):
     log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'With courier for order {order.order_number}')
     
     return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
+# Alias for seller convenience
+@app.route('/messages/start-courier-conversation/<int:order_id>')
+@login_required
+def start_courier_conversation(order_id):
+    """Alias for start_conversation_with_courier for easier access"""
+    return start_conversation_with_courier(order_id)
 
 
 @app.route('/messages/check-new/<int:conversation_id>')
