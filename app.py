@@ -13,6 +13,7 @@ import base64
 import os
 import secrets
 import pymysql
+import uuid
 pymysql.install_as_MySQLdb()
 from sqlalchemy import Numeric
 
