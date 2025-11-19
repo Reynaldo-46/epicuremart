@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -16,6 +16,12 @@ import pymysql
 import uuid
 pymysql.install_as_MySQLdb()
 from sqlalchemy import Numeric
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
 
 app = Flask(__name__)
@@ -1746,6 +1752,104 @@ def seller_sales_report():
     )
 
 
+@app.route('/seller/sales-report/export-pdf')
+@login_required
+@role_required('seller')
+def seller_sales_report_export_pdf():
+    """Export seller sales report as PDF"""
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        flash('You need a shop to export sales report.', 'error')
+        return redirect(url_for('seller_dashboard'))
+    
+    # Get filter parameters
+    status_filter = request.args.get('status', 'all')
+    
+    # Build query
+    query = Order.query.filter_by(shop_id=user.shop.id)
+    
+    if status_filter != 'all':
+        query = query.filter_by(status=status_filter)
+    
+    # Get orders (limit to 100 for PDF)
+    orders = query.order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_orders = query.count()
+    delivered_orders = Order.query.filter_by(shop_id=user.shop.id, status='DELIVERED').count()
+    
+    total_sales = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    total_commission = total_sales * Decimal('0.05')
+    total_earnings = total_sales - total_commission
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#dc3545'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Sales Report - {user.shop.name}", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Filter:</b> {status_filter.upper() if status_filter != 'all' else 'ALL ORDERS'}", summary_style))
+    elements.append(Paragraph(f"<b>Total Orders:</b> {total_orders}", summary_style))
+    elements.append(Paragraph(f"<b>Delivered Orders:</b> {delivered_orders}", summary_style))
+    elements.append(Paragraph(f"<b>Total Sales:</b> ₱{total_sales:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform Commission (5%):</b> ₱{total_commission:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Your Earnings (95%):</b> ₱{total_earnings:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Customer', 'Status', 'Subtotal', 'Commission', 'Earnings']]
+    
+    # Table data
+    for order in orders:
+        commission = order.subtotal * Decimal('0.05') if order.status == 'DELIVERED' else Decimal('0')
+        earnings = order.subtotal - commission if order.status == 'DELIVERED' else Decimal('0')
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.customer.email[:20],
+            order.status,
+            f"₱{order.subtotal:,.2f}",
+            f"₱{commission:,.2f}",
+            f"₱{earnings:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.8*inch, 1*inch, 1.8*inch, 1*inch, 1*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dc3545')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=sales_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
+
+
 @app.route('/seller/shop/create', methods=['GET', 'POST'])
 @login_required
 @role_required('seller')
@@ -2013,6 +2117,90 @@ def courier_dashboard():
     )
 
 
+@app.route('/courier/earnings-report/export-pdf')
+@login_required
+@role_required('courier')
+def courier_earnings_report_export_pdf():
+    """Export courier earnings report as PDF"""
+    user_id = session['user_id']
+    user = User.query.get(user_id)
+    
+    # Get completed deliveries (limit to 100 for PDF)
+    orders = Order.query.filter_by(courier_id=user_id, status='DELIVERED')\
+        .order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_deliveries = Order.query.filter_by(courier_id=user_id, status='DELIVERED').count()
+    total_earnings = db.session.query(func.sum(Order.courier_earnings))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    courier_commission = total_delivery_fees * Decimal('0.40')
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#17a2b8'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Courier Earnings Report", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Courier:</b> {user.email}", summary_style))
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Total Deliveries:</b> {total_deliveries}", summary_style))
+    elements.append(Paragraph(f"<b>Total Delivery Fees:</b> ₱{total_delivery_fees:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform Commission (40%):</b> ₱{courier_commission:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Your Earnings (60%):</b> ₱{total_earnings:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Shop', 'Delivery Fee', 'Platform (40%)', 'Your Earnings (60%)']]
+    
+    # Table data
+    for order in orders:
+        platform_cut = order.delivery_fee * Decimal('0.40')
+        courier_earn = order.courier_earnings or Decimal('0')
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.shop.name[:25] if order.shop else 'N/A',
+            f"₱{order.delivery_fee:,.2f}",
+            f"₱{platform_cut:,.2f}",
+            f"₱{courier_earn:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.8*inch, 1*inch, 2*inch, 1.2*inch, 1.2*inch, 1.3*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#17a2b8')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=courier_earnings_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
+
+
 @app.route('/courier/pickup-manifest')
 @login_required
 @role_required('courier')
@@ -2133,6 +2321,90 @@ def rider_dashboard():
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
     )
+
+
+@app.route('/rider/earnings-report/export-pdf')
+@login_required
+@role_required('rider')
+def rider_earnings_report_export_pdf():
+    """Export rider earnings report as PDF"""
+    user_id = session['user_id']
+    user = User.query.get(user_id)
+    
+    # Get completed deliveries (limit to 100 for PDF)
+    orders = Order.query.filter_by(rider_id=user_id, status='DELIVERED')\
+        .order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_deliveries = Order.query.filter_by(rider_id=user_id, status='DELIVERED').count()
+    total_earnings = db.session.query(func.sum(Order.rider_earnings))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    rider_commission = total_delivery_fees * Decimal('0.60')
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#28a745'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Rider Earnings Report", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Rider:</b> {user.email}", summary_style))
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Total Deliveries:</b> {total_deliveries}", summary_style))
+    elements.append(Paragraph(f"<b>Total Delivery Fees:</b> ₱{total_delivery_fees:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform/Courier Share (60%):</b> ₱{rider_commission:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Your Earnings (40%):</b> ₱{total_earnings:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Customer', 'Delivery Fee', 'Platform (60%)', 'Your Earnings (40%)']]
+    
+    # Table data
+    for order in orders:
+        platform_cut = order.delivery_fee * Decimal('0.60')
+        rider_earn = order.rider_earnings or Decimal('0')
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.customer.email[:25] if order.customer else 'N/A',
+            f"₱{order.delivery_fee:,.2f}",
+            f"₱{platform_cut:,.2f}",
+            f"₱{rider_earn:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.8*inch, 1*inch, 2*inch, 1.2*inch, 1.2*inch, 1.3*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#28a745')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=rider_earnings_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
 
 
 @app.route('/rider/delivery-manifest')
@@ -2408,6 +2680,156 @@ def admin_dashboard():
         end_date=end_date_str,
         recent_logs=recent_logs
     )
+
+
+@app.route('/admin/sales-report/export-pdf')
+@login_required
+@role_required('admin')
+def admin_sales_report_export_pdf():
+    """Export admin sales report as PDF"""
+    time_filter = request.args.get('filter', 'all')
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    # Parse date range
+    now = datetime.utcnow()
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            start_date = None
+            end_date = None
+    
+    # Calculate date range based on filter if no custom range
+    if not start_date and not end_date:
+        if time_filter == 'day':
+            start_date = now - timedelta(days=1)
+        elif time_filter == 'week':
+            start_date = now - timedelta(weeks=1)
+        elif time_filter == 'month':
+            start_date = now - timedelta(days=30)
+        elif time_filter == 'year':
+            start_date = now - timedelta(days=365)
+    
+    # Query orders (limit to 100 for PDF)
+    order_query = Order.query.filter_by(status='DELIVERED')
+    if start_date:
+        order_query = order_query.filter(Order.created_at >= start_date)
+    if end_date:
+        order_query = order_query.filter(Order.created_at <= end_date)
+    
+    orders = order_query.order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_query = Order.query.filter_by(status='DELIVERED')
+    if start_date:
+        total_query = total_query.filter(Order.created_at >= start_date)
+    if end_date:
+        total_query = total_query.filter(Order.created_at <= end_date)
+    
+    total_orders = total_query.count()
+    total_revenue = db.session.query(func.sum(Order.total_amount)).filter(
+        Order.status == 'DELIVERED')
+    if start_date:
+        total_revenue = total_revenue.filter(Order.created_at >= start_date)
+    if end_date:
+        total_revenue = total_revenue.filter(Order.created_at <= end_date)
+    total_revenue = total_revenue.scalar() or Decimal('0')
+    
+    commission_received = db.session.query(func.sum(Order.commission_amount)).filter(
+        Order.status == 'DELIVERED')
+    if start_date:
+        commission_received = commission_received.filter(Order.created_at >= start_date)
+    if end_date:
+        commission_received = commission_received.filter(Order.created_at <= end_date)
+    commission_received = commission_received.scalar() or Decimal('0')
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#6c757d'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Admin Sales Report - Epicuremart", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Filter:</b> {time_filter.upper()}", summary_style))
+    if start_date:
+        elements.append(Paragraph(f"<b>Date Range:</b> {start_date.strftime('%m/%d/%Y')} - {(end_date or now).strftime('%m/%d/%Y')}", summary_style))
+    elements.append(Paragraph(f"<b>Total Delivered Orders:</b> {total_orders}", summary_style))
+    elements.append(Paragraph(f"<b>Total Revenue:</b> ₱{total_revenue:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform Commission:</b> ₱{commission_received:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Shop', 'Customer', 'Total', 'Commission']]
+    
+    # Table data
+    for order in orders:
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.shop.name[:20] if order.shop else 'N/A',
+            order.customer.email[:20] if order.customer else 'N/A',
+            f"₱{order.total_amount:,.2f}",
+            f"₱{order.commission_amount:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.7*inch, 1*inch, 1.5*inch, 1.5*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6c757d')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=admin_sales_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
+
+
+@app.route('/withdrawal-request')
+@login_required
+def withdrawal_request():
+    """Withdrawal request page for sellers, couriers, and riders"""
+    user = User.query.get(session['user_id'])
+    
+    # Redirect based on role
+    if user.role == 'seller':
+        flash('Withdrawal feature coming soon!', 'info')
+        return redirect(url_for('seller_dashboard'))
+    elif user.role == 'courier':
+        flash('Withdrawal feature coming soon!', 'info')
+        return redirect(url_for('courier_dashboard'))
+    elif user.role == 'rider':
+        flash('Withdrawal feature coming soon!', 'info')
+        return redirect(url_for('rider_dashboard'))
+    else:
+        flash('Withdrawal not available for your account type.', 'warning')
+        return redirect(url_for('dashboard'))
 
 
 @app.route('/admin/approvals')
