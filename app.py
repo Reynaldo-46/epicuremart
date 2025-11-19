@@ -2907,6 +2907,46 @@ def admin_users():
     )
 
 
+@app.route('/admin/start-conversation/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def admin_start_conversation(user_id):
+    """Admin starts a conversation with any user"""
+    admin = User.query.get(session['user_id'])
+    target_user = User.query.get_or_404(user_id)
+    
+    if target_user.id == admin.id:
+        flash('Cannot start a conversation with yourself.', 'warning')
+        return redirect(url_for('admin_users'))
+    
+    # Check for existing conversation
+    existing_conv = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == admin.id, Conversation.user2_id == target_user.id),
+            db.and_(Conversation.user1_id == target_user.id, Conversation.user2_id == admin.id)
+        ),
+        Conversation.conversation_type == 'user_admin'
+    ).first()
+    
+    if existing_conv:
+        return redirect(url_for('view_conversation', conversation_id=existing_conv.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=admin.id,
+        user2_id=target_user.id,
+        conversation_type='user_admin'
+    )
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('ADMIN_CONVERSATION_STARTED', 'Conversation', conversation.id, 
+               f'Admin started conversation with {target_user.email}')
+    
+    flash(f'Conversation started with {target_user.full_name or target_user.email}', 'success')
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
+
+
 @app.route('/admin/user/suspend/<int:user_id>', methods=['POST'])
 @login_required
 @role_required('admin')
