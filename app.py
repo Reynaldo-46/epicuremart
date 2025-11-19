@@ -3127,9 +3127,11 @@ def check_new_messages(conversation_id):
     
     last_message_id = request.args.get('last_id', 0, type=int)
     
+    # Only fetch messages NOT sent by current user to avoid echo/duplicate
     new_messages = Message.query.filter(
         Message.conversation_id == conversation_id,
-        Message.id > last_message_id
+        Message.id > last_message_id,
+        Message.sender_id != user.id  # Exclude messages sent by current user
     ).order_by(Message.created_at.asc()).all()
     
     messages_data = []
@@ -3140,7 +3142,7 @@ def check_new_messages(conversation_id):
             'message_text': msg.message_text,
             'image': msg.image,
             'created_at': msg.created_at.strftime('%I:%M %p'),
-            'is_own': msg.sender_id == user.id
+            'is_own': False  # Always False since we exclude own messages
         })
     
     return jsonify({

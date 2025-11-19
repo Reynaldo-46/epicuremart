@@ -492,13 +492,18 @@
 
       // Show upload progress if image is present
       if (hasImage) {
-          document.getElementById('uploadProgress').style.display = 'block';
+          const progressDiv = document.getElementById('uploadProgress');
+          if (progressDiv) progressDiv.style.display = 'block';
       }
 
       const formData = new FormData(form);
       const conversationId = {{ conversation.id }};
       
       console.log('SENDING: FormData created, conversation:', conversationId);
+      console.log('SENDING: FormData entries:');
+      for (let pair of formData.entries()) {
+          console.log('SENDING:', pair[0], '=', pair[1]);
+      }
 
       fetch(`/messages/send/${conversationId}`, {
           method: 'POST',
@@ -510,7 +515,9 @@
       .then(response => {
           console.log('SENDING: Response received, status:', response.status);
           if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
+              return response.json().then(data => {
+                  throw new Error(data.message || `HTTP error! status: ${response.status}`);
+              });
           }
           return response.json();
       })
@@ -518,6 +525,19 @@
           console.log('SENDING: Data parsed:', data);
           if (data.success) {
               console.log('SENDING: Success! Reloading page...');
+              // Clear form
+              messageInput.value = '';
+              imageInput.value = '';
+              removeImagePreview();
+              
+              // Re-enable inputs
+              messageInput.disabled = false;
+              sendBtn.disabled = false;
+              
+              // Hide progress
+              const progressDiv = document.getElementById('uploadProgress');
+              if (progressDiv) progressDiv.style.display = 'none';
+              
               // Reload page to show new message with proper formatting
               location.reload();
           } else {
@@ -525,15 +545,17 @@
               alert('Failed to send message: ' + (data.message || 'Unknown error'));
               messageInput.disabled = false;
               sendBtn.disabled = false;
-              document.getElementById('uploadProgress').style.display = 'none';
+              const progressDiv = document.getElementById('uploadProgress');
+              if (progressDiv) progressDiv.style.display = 'none';
           }
       })
       .catch(error => {
           console.error('SENDING: Error caught:', error);
-          alert('Failed to send message. Please check your connection and try again.');
+          alert('Failed to send message: ' + error.message);
           messageInput.disabled = false;
           sendBtn.disabled = false;
-          document.getElementById('uploadProgress').style.display = 'none';
+          const progressDiv = document.getElementById('uploadProgress');
+          if (progressDiv) progressDiv.style.display = 'none';
       });
   }
 
