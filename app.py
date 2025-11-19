@@ -3256,28 +3256,49 @@ def messages_inbox():
 @app.route('/messages/conversation/<int:conversation_id>')
 @login_required
 def view_conversation(conversation_id):
+    from datetime import datetime, timedelta
+    
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Check authorization (also allow admin to view all conversations)
+    if user.role != 'admin' and user.id not in [conversation.user1_id, conversation.user2_id]:
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('messages_inbox'))
     
-    # Mark messages as read
-    Message.query.filter(
+    # Mark messages as read and update status
+    unread_messages = Message.query.filter(
         Message.conversation_id == conversation_id,
         Message.sender_id != user.id,
         Message.is_read == False
-    ).update({'is_read': True})
+    ).all()
+    
+    for msg in unread_messages:
+        msg.is_read = True
+        if msg.status == 'delivered':
+            msg.status = 'seen'
+            msg.seen_at = datetime.utcnow()
+    
     db.session.commit()
     
     messages = Message.query.filter_by(conversation_id=conversation_id)\
         .order_by(Message.created_at.asc()).all()
     
+    # Get the other user and their online status
+    other_user = conversation.user2 if conversation.user1_id == user.id else conversation.user1
+    online_status = get_user_online_status(other_user)
+    
+    # Check if conversation is read-only
+    is_read_only = conversation.is_read_only or (user.role == 'admin' and user.id not in [conversation.user1_id, conversation.user2_id])
+    
     return render_template('conversation.html',
         conversation=conversation,
-        messages=messages
+        messages=messages,
+        other_user=other_user,
+        online_status=online_status,
+        is_read_only=is_read_only,
+        now=datetime.utcnow(),
+        timedelta=timedelta
     )
 
 
@@ -3291,15 +3312,38 @@ def send_message(conversation_id):
     if user.id not in [conversation.user1_id, conversation.user2_id]:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
+    # Check if conversation is read-only
+    if conversation.is_read_only:
+        return jsonify({'success': False, 'message': 'This conversation is read-only'}), 403
+    
     message_text = request.form.get('message_text', '').strip()
-    print("DEBUG received message_text =", message_text)
+    message_type = 'text'
+    image_url = None
+    
+    # Handle image upload
+    if 'image' in request.files:
+        file = request.files['image']
+        if file and file.filename and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            unique_filename = f"chat_{timestamp}_{filename}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            file.save(file_path)
+            image_url = unique_filename
+            message_type = 'image'
+            if not message_text:
+                message_text = '[Image]'  # Default text for image messages
+    
     if not message_text:
         return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
     
     message = Message(
         conversation_id=conversation_id,
         sender_id=user.id,
-        message_text=message_text
+        message_text=message_text,
+        message_type=message_type,
+        image_url=image_url,
+        status='sent'
     )
     
     conversation.last_message_at = datetime.utcnow()
@@ -3315,6 +3359,8 @@ def send_message(conversation_id):
             'id': message.id,
             'sender_name': user.full_name,
             'message_text': message.message_text,
+            'message_type': message_type,
+            'image_url': image_url,
             'created_at': message.created_at.strftime('%I:%M %p'),
             'is_own': True
         }
