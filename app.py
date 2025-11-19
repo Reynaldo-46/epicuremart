@@ -85,6 +85,7 @@ class User(db.Model):
     profile_picture = db.Column(db.String(255))  # Profile picture/business icon
     is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
+    quick_reply_templates = db.Column(db.Text)  # JSON string of quick reply templates
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -272,7 +273,8 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin', 'seller_courier'), nullable=False)
+    is_read_only = db.Column(db.Boolean, default=False)  # Read-only for completed orders
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -289,7 +291,12 @@ class Message(db.Model):
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
     sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     message_text = db.Column(db.Text, nullable=False)
-    is_read = db.Column(db.Boolean, default=False)
+    message_type = db.Column(db.Enum('text', 'image'), default='text')
+    image_url = db.Column(db.String(255))  # For image messages
+    status = db.Column(db.Enum('sent', 'delivered', 'seen'), default='sent')  # Message status
+    delivered_at = db.Column(db.DateTime)  # When message was delivered
+    seen_at = db.Column(db.DateTime)  # When message was seen
+    is_read = db.Column(db.Boolean, default=False)  # Deprecated, use status instead
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
@@ -422,6 +429,198 @@ def generate_order_number():
     timestamp = datetime.now().strftime('%Y%m%d')
     random_part = ''.join([str(random.randint(0, 9)) for _ in range(6)])
     return f"EM{timestamp}{random_part}"
+
+
+def update_user_activity():
+    """Update the last_activity timestamp for the current user"""
+    if 'user_id' in session:
+        try:
+            user = User.query.get(session['user_id'])
+            if user:
+                user.last_activity = datetime.utcnow()
+                db.session.commit()
+        except Exception as e:
+            print(f"Error updating user activity: {e}")
+
+
+def get_user_online_status(user):
+    """Get online status and last active time for a user"""
+    if not user or not user.last_activity:
+        return {'online': False, 'last_active': None, 'last_active_text': 'Never'}
+    
+    now = datetime.utcnow()
+    time_diff = (now - user.last_activity).total_seconds()
+    
+    # Online if active in last 5 minutes
+    if time_diff < 300:
+        return {'online': True, 'last_active': user.last_activity, 'last_active_text': 'Online'}
+    
+    # Format last active text
+    if time_diff < 3600:  # Less than 1 hour
+        minutes = int(time_diff / 60)
+        text = f"Last active {minutes} minute{'s' if minutes != 1 else ''} ago"
+    elif time_diff < 86400:  # Less than 1 day
+        hours = int(time_diff / 3600)
+        text = f"Last active {hours} hour{'s' if hours != 1 else ''} ago"
+    elif time_diff < 172800:  # Less than 2 days
+        text = f"Last active yesterday, {user.last_activity.strftime('%I:%M %p')}"
+    else:
+        text = f"Last active {user.last_activity.strftime('%b %d, %I:%M %p')}"
+    
+    return {'online': False, 'last_active': user.last_activity, 'last_active_text': text}
+
+
+def generate_sales_report_pdf(user_role, user_id, start_date=None, end_date=None):
+    """Generate PDF sales report for admin, seller, courier, or rider"""
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    
+    # Create PDF buffer
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title style
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#2c3e50'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    # Get user
+    user = User.query.get(user_id)
+    
+    # Title
+    elements.append(Paragraph("Sales Report", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # User Information
+    info_data = [
+        ['User Information', ''],
+        ['Name:', user.full_name or user.email],
+        ['Role:', user.role.upper()],
+        ['User ID:', str(user.id)],
+    ]
+    
+    # Date range
+    if start_date and end_date:
+        info_data.append(['Date Range:', f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"])
+    else:
+        info_data.append(['Date Range:', 'All Time'])
+    
+    info_table = Table(info_data, colWidths=[2*inch, 4*inch])
+    info_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 20))
+    
+    # Query based on role
+    from sqlalchemy import func
+    
+    if user_role == 'seller':
+        shop = user.shop
+        if not shop:
+            return None
+        
+        query = Order.query.filter_by(shop_id=shop.id, status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_sales = sum([float(o.subtotal) for o in orders])
+        total_commission = sum([float(o.commission_amount) for o in orders])
+        total_earnings = sum([float(o.seller_amount) for o in orders])
+        order_count = len(orders)
+        
+        # Summary data
+        summary_data = [
+            ['Summary', ''],
+            ['Total Orders:', str(order_count)],
+            ['Total Sales (Before Commission):', f"₱{total_sales:,.2f}"],
+            ['Admin Commission (5%):', f"₱{total_commission:,.2f}"],
+            ['Your Earnings (95%):', f"₱{total_earnings:,.2f}"],
+        ]
+        
+    elif user_role == 'courier':
+        query = Order.query.filter_by(courier_id=user_id, status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_earnings = sum([float(o.courier_earnings) for o in orders])
+        order_count = len(orders)
+        
+        summary_data = [
+            ['Summary', ''],
+            ['Total Deliveries:', str(order_count)],
+            ['Total Earnings:', f"₱{total_earnings:,.2f}"],
+        ]
+        
+    elif user_role == 'rider':
+        query = Order.query.filter_by(rider_id=user_id, status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_earnings = sum([float(o.rider_earnings) for o in orders])
+        order_count = len(orders)
+        
+        summary_data = [
+            ['Summary', ''],
+            ['Total Deliveries:', str(order_count)],
+            ['Total Earnings:', f"₱{total_earnings:,.2f}"],
+        ]
+        
+    elif user_role == 'admin':
+        query = Order.query.filter_by(status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_sales = sum([float(o.subtotal) for o in orders])
+        total_commission = sum([float(o.commission_amount) for o in orders])
+        order_count = len(orders)
+        
+        summary_data = [
+            ['Summary', ''],
+            ['Total Orders:', str(order_count)],
+            ['Total Sales:', f"₱{total_sales:,.2f}"],
+            ['Total Commission Earned:', f"₱{total_commission:,.2f}"],
+        ]
+    
+    summary_table = Table(summary_data, colWidths=[3*inch, 3*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2ecc71')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(summary_table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
 
 @app.context_processor
@@ -3818,6 +4017,9 @@ def create_tables():
         
         db.session.commit()
         app.tables_created = True
+    
+    # Update user activity on every request
+    update_user_activity()
 
 
 @app.route('/api/calabarzon-addresses')
