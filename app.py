@@ -3349,17 +3349,22 @@ def view_conversation(conversation_id):
 @app.route('/messages/send/<int:conversation_id>', methods=['POST'])
 @login_required
 def send_message(conversation_id):
+    """Send a message in a conversation - FIXED VERSION"""
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+    # Check authorization - allow admins, support agents, and conversation participants
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
+    
+    if not (is_participant or is_admin):
+        return jsonify({'success': False, 'error': 'Access denied'}), 403
     
     # Check if conversation is read-only
     if conversation.is_read_only:
-        return jsonify({'success': False, 'message': 'This conversation is read-only'}), 403
+        return jsonify({'success': False, 'error': 'This conversation is read-only'}), 403
     
+    # Get message text from form data (not JSON)
     message_text = request.form.get('message_text', '').strip()
     message_type = 'text'
     image_url = None
@@ -3375,12 +3380,15 @@ def send_message(conversation_id):
             file.save(file_path)
             image_url = unique_filename
             message_type = 'image'
+            # If no text provided with image, use placeholder
             if not message_text:
-                message_text = '[Image]'  # Default text for image messages
+                message_text = '[Image]'
     
+    # Validate that we have either text or image
     if not message_text:
-        return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
+        return jsonify({'success': False, 'error': 'Message cannot be empty'}), 400
     
+    # Create message
     message = Message(
         conversation_id=conversation_id,
         sender_id=user.id,
@@ -3390,23 +3398,34 @@ def send_message(conversation_id):
         status='sent'
     )
     
+    # Update conversation timestamp
     conversation.last_message_at = datetime.utcnow()
     
     db.session.add(message)
     db.session.commit()
     
-    log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
+    # Update last activity for support agents and admins
+    if user.is_support_agent or user.role == 'admin':
+        user.last_activity = datetime.utcnow()
+        db.session.commit()
     
+    # Log admin participation in conversation
+    if is_admin and not is_participant:
+        log_action('ADMIN_SEND_SUPPORT_MESSAGE', 'Message', message.id, 
+                  f'Admin sent message in conversation {conversation_id}')
+    
+    # Return success with message data
     return jsonify({
         'success': True,
         'message': {
             'id': message.id,
-            'sender_name': user.full_name,
+            'sender_name': user.full_name or user.email,
             'message_text': message.message_text,
             'message_type': message_type,
             'image_url': image_url,
             'created_at': message.created_at.strftime('%I:%M %p'),
-            'is_own': True
+            'is_own': True,
+            'status': 'sent'
         }
     })
 

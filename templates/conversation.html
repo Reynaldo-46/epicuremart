@@ -500,7 +500,6 @@ let lastMessageId = 0;
     }
 })();
 
-// Auto-scroll when new message is sent
 function sendMessage(event) {
     event.preventDefault();
     
@@ -511,6 +510,7 @@ function sendMessage(event) {
     
     // Require either text or image
     if (!messageText && !imageInput.files[0]) {
+        console.log('No message text or image');
         return;
     }
     
@@ -518,8 +518,18 @@ function sendMessage(event) {
     
     // Disable input while sending
     messageInput.disabled = true;
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
     
-    const formData = new FormData(form);
+    // Create FormData and explicitly add message_text
+    const formData = new FormData();
+    formData.append('message_text', messageText);
+    
+    // Add image if present
+    if (imageInput.files[0]) {
+        formData.append('image', imageInput.files[0]);
+    }
+    
     const conversationId = {{ conversation.id }};
     
     fetch(`/messages/send/${conversationId}`, {
@@ -532,7 +542,11 @@ function sendMessage(event) {
     .then(response => {
         console.log('Response status:', response.status);
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            return response.json().then(data => {
+                throw new Error(data.error || `HTTP error! status: ${response.status}`);
+            }).catch(() => {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            });
         }
         return response.json();
     })
@@ -587,6 +601,7 @@ function sendMessage(event) {
             // Clear input and re-enable
             messageInput.value = '';
             messageInput.disabled = false;
+            if (submitButton) submitButton.disabled = false;
             clearImagePreview();
             messageInput.focus();
             
@@ -594,15 +609,14 @@ function sendMessage(event) {
             scrollToBottom(true);
             console.log('Message sent successfully!');
         } else {
-            console.error('Server returned error:', data.message);
-            alert('Failed to send message: ' + (data.message || 'Unknown error'));
-            messageInput.disabled = false;
+            throw new Error(data.error || 'Unknown error');
         }
     })
     .catch(error => {
         console.error('Error sending message:', error);
-        alert('Failed to send message. Please check your connection and try again.');
+        alert('Failed to send message: ' + error.message);
         messageInput.disabled = false;
+        if (submitButton) submitButton.disabled = false;
     });
 }
 
@@ -642,7 +656,6 @@ setInterval(function() {
             data.messages.forEach(message => {
                 // Skip messages from current user (they're already displayed when sent)
                 if (message.is_own) {
-                    // Just update lastMessageId to avoid fetching this message again
                     lastMessageId = message.id;
                     return;
                 }
@@ -667,7 +680,9 @@ setInterval(function() {
                 
                 // Add text if present and not just [Image]
                 if (message.message_text && message.message_text !== '[Image]') {
-                    messageContent += `<p class="mb-1">${message.message_text}</p>`;
+                    const escapedText = document.createElement('div');
+                    escapedText.textContent = message.message_text;
+                    messageContent += `<p class="mb-1">${escapedText.innerHTML}</p>`;
                 }
                 
                 messageDiv.innerHTML = `
