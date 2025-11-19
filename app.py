@@ -543,9 +543,9 @@ def generate_sales_report_pdf(user_role, user_id, start_date=None, end_date=None
             query = query.filter(Order.created_at.between(start_date, end_date))
         
         orders = query.all()
-        total_sales = sum([float(o.subtotal) for o in orders])
-        total_commission = sum([float(o.commission_amount) for o in orders])
-        total_earnings = sum([float(o.seller_amount) for o in orders])
+        total_sales = sum([float(o.subtotal or 0) for o in orders])
+        total_commission = sum([float(o.commission_amount or 0) for o in orders])
+        total_earnings = sum([float(o.seller_amount or 0) for o in orders])
         order_count = len(orders)
         
         # Summary data
@@ -563,7 +563,7 @@ def generate_sales_report_pdf(user_role, user_id, start_date=None, end_date=None
             query = query.filter(Order.created_at.between(start_date, end_date))
         
         orders = query.all()
-        total_earnings = sum([float(o.courier_earnings) for o in orders])
+        total_earnings = sum([float(o.courier_earnings or 0) for o in orders])
         order_count = len(orders)
         
         summary_data = [
@@ -578,7 +578,7 @@ def generate_sales_report_pdf(user_role, user_id, start_date=None, end_date=None
             query = query.filter(Order.created_at.between(start_date, end_date))
         
         orders = query.all()
-        total_earnings = sum([float(o.rider_earnings) for o in orders])
+        total_earnings = sum([float(o.rider_earnings or 0) for o in orders])
         order_count = len(orders)
         
         summary_data = [
@@ -593,8 +593,8 @@ def generate_sales_report_pdf(user_role, user_id, start_date=None, end_date=None
             query = query.filter(Order.created_at.between(start_date, end_date))
         
         orders = query.all()
-        total_sales = sum([float(o.subtotal) for o in orders])
-        total_commission = sum([float(o.commission_amount) for o in orders])
+        total_sales = sum([float(o.subtotal or 0) for o in orders])
+        total_commission = sum([float(o.commission_amount or 0) for o in orders])
         order_count = len(orders)
         
         summary_data = [
