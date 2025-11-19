@@ -3280,11 +3280,15 @@ def messages_inbox():
         last_message = Message.query.filter_by(conversation_id=conv.id)\
             .order_by(Message.created_at.desc()).first()
         
+        # Get online status for other user
+        online_status = get_user_online_status(other_user)
+        
         conversation_data.append({
             'conversation': conv,
             'other_user': other_user,
             'unread_count': unread_count,
-            'last_message': last_message
+            'last_message': last_message,
+            'online_status': online_status
         })
     
     return render_template('messages_inbox.html', 
