@@ -489,6 +489,17 @@ window.addEventListener('load', function() {
     setTimeout(() => scrollToBottom(false), 100);
 });
 
+// Global variable to track last message ID for polling
+let lastMessageId = 0;
+
+// Initialize lastMessageId from existing messages
+(function() {
+    const messageElements = document.querySelectorAll('[data-message-id]');
+    if (messageElements.length > 0) {
+        lastMessageId = parseInt(messageElements[messageElements.length - 1].dataset.messageId);
+    }
+})();
+
 // Auto-scroll when new message is sent
 function sendMessage(event) {
     event.preventDefault();
@@ -528,6 +539,9 @@ function sendMessage(event) {
     .then(data => {
         console.log('Response data:', data);
         if (data.success) {
+            // Update lastMessageId to prevent duplicate from polling
+            lastMessageId = data.message.id;
+            
             // Add message to chat
             const chatMessages = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
@@ -617,64 +631,63 @@ function openImageModal(imageUrl) {
 }
 
 // Check for new messages periodically
-(function() {
-    let lastMessageId = 0;
-    const messageElements = document.querySelectorAll('[data-message-id]');
-    if (messageElements.length > 0) {
-        lastMessageId = parseInt(messageElements[messageElements.length - 1].dataset.messageId);
-    }
+setInterval(function() {
+    const conversationId = {{ conversation.id }};
     
-    setInterval(function() {
-        const conversationId = {{ conversation.id }};
-        
-        fetch(`/messages/check-new/${conversationId}?last_id=${lastMessageId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.messages && data.messages.length > 0) {
-                const chatMessages = document.getElementById('chatMessages');
-                data.messages.forEach(message => {
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = 'message message-other';
-                    messageDiv.dataset.messageId = message.id;
-                    
-                    let messageContent = '';
-                    
-                    // Add image if present
-                    if (message.message_type === 'image' && message.image_url) {
-                        messageContent += `
-                            <div class="message-image-container" onclick="openImageModal('/static/uploads/${message.image_url}')">
-                                <img src="/static/uploads/${message.image_url}" class="message-image" alt="Shared image">
-                                <div class="image-overlay">
-                                    <i class="fas fa-search-plus"></i>
-                                </div>
+    fetch(`/messages/check-new/${conversationId}?last_id=${lastMessageId}`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.messages && data.messages.length > 0) {
+            const chatMessages = document.getElementById('chatMessages');
+            data.messages.forEach(message => {
+                // Skip messages from current user (they're already displayed when sent)
+                if (message.is_own) {
+                    // Just update lastMessageId to avoid fetching this message again
+                    lastMessageId = message.id;
+                    return;
+                }
+                
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message message-other';
+                messageDiv.dataset.messageId = message.id;
+                
+                let messageContent = '';
+                
+                // Add image if present
+                if (message.message_type === 'image' && message.image_url) {
+                    messageContent += `
+                        <div class="message-image-container" onclick="openImageModal('/static/uploads/${message.image_url}')">
+                            <img src="/static/uploads/${message.image_url}" class="message-image" alt="Shared image">
+                            <div class="image-overlay">
+                                <i class="fas fa-search-plus"></i>
                             </div>
-                        `;
-                    }
-                    
-                    // Add text if present and not just [Image]
-                    if (message.message_text && message.message_text !== '[Image]') {
-                        messageContent += `<p class="mb-1">${message.message_text}</p>`;
-                    }
-                    
-                    messageDiv.innerHTML = `
-                        <div class="message-bubble">
-                            ${messageContent}
-                            <small class="message-time">${message.created_at}</small>
                         </div>
                     `;
-                    chatMessages.appendChild(messageDiv);
-                    lastMessageId = message.id;
-                });
+                }
                 
-                // Auto-scroll to new messages
-                scrollToBottom(true);
-            }
-        })
-        .catch(error => {
-            console.error('Error checking for new messages:', error);
-        });
-    }, 5000);
-})();
+                // Add text if present and not just [Image]
+                if (message.message_text && message.message_text !== '[Image]') {
+                    messageContent += `<p class="mb-1">${message.message_text}</p>`;
+                }
+                
+                messageDiv.innerHTML = `
+                    <div class="message-bubble">
+                        ${messageContent}
+                        <small class="message-time">${message.created_at}</small>
+                    </div>
+                `;
+                chatMessages.appendChild(messageDiv);
+                lastMessageId = message.id;
+            });
+            
+            // Auto-scroll to new messages
+            scrollToBottom(true);
+        }
+    })
+    .catch(error => {
+        console.error('Error checking for new messages:', error);
+    });
+}, 5000);
 </script>
 
 
