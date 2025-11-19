@@ -1964,6 +1964,51 @@ def seller_sales_report():
     )
 
 
+@app.route('/seller/sales-report/export-pdf')
+@login_required
+@role_required('seller')
+def seller_sales_report_export_pdf():
+    """Export seller sales report as PDF"""
+    from flask import send_file
+    
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        flash('You need to create a shop first.', 'warning')
+        return redirect(url_for('create_shop'))
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('seller', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('seller_sales_report'))
+    
+    # Create filename
+    filename = f"sales_report_{user.shop.name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 @app.route('/seller/shop/create', methods=['GET', 'POST'])
 @login_required
 @role_required('seller')
@@ -2231,6 +2276,45 @@ def courier_dashboard():
     )
 
 
+@app.route('/courier/earnings-report/export-pdf')
+@login_required
+@role_required('courier')
+def courier_earnings_export_pdf():
+    """Export courier earnings report as PDF"""
+    from flask import send_file
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('courier', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+    
+    # Create filename
+    filename = f"courier_earnings_report_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 @app.route('/courier/pickup-manifest')
 @login_required
 @role_required('courier')
@@ -2350,6 +2434,45 @@ def rider_dashboard():
         rider_commission=rider_commission,
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
+    )
+
+
+@app.route('/rider/earnings-report/export-pdf')
+@login_required
+@role_required('rider')
+def rider_earnings_export_pdf():
+    """Export rider earnings report as PDF"""
+    from flask import send_file
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('rider', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('rider_dashboard'))
+    
+    # Create filename
+    filename = f"rider_earnings_report_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
     )
 
 
@@ -2625,6 +2748,45 @@ def admin_dashboard():
         start_date=start_date_str,
         end_date=end_date_str,
         recent_logs=recent_logs
+    )
+
+
+@app.route('/admin/sales-report/export-pdf')
+@login_required
+@role_required('admin')
+def admin_sales_report_export_pdf():
+    """Export admin sales report as PDF"""
+    from flask import send_file
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('admin', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    
+    # Create filename
+    filename = f"admin_sales_report_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
     )
 
 
