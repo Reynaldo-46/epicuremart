@@ -2867,52 +2867,83 @@ def view_conversation(conversation_id):
 @login_required
 def send_message(conversation_id):
     try:
-        print(f"DEBUG: send_message called for conversation {conversation_id}")
+        print(f"\n{'='*60}")
+        print(f"send_message called for conversation {conversation_id}")
+        print(f"Request method: {request.method}")
+        print(f"Request content type: {request.content_type}")
+        print(f"Request form keys: {list(request.form.keys())}")
+        print(f"Request files keys: {list(request.files.keys())}")
+        
         conversation = Conversation.query.get_or_404(conversation_id)
         user = User.query.get(session['user_id'])
-        print(f"DEBUG: User {user.id} sending message")
+        print(f"User {user.id} ({user.email}) sending message")
         
         # Check authorization - allow admins to send messages in any conversation
         is_participant = user.id in [conversation.user1_id, conversation.user2_id]
         is_admin = user.role == 'admin'
         
         if not (is_participant or is_admin):
-            print("DEBUG: Unauthorized user")
+            print("UNAUTHORIZED: User is not a participant or admin")
             return jsonify({'success': False, 'message': 'Unauthorized'}), 403
         
         message_text = request.form.get('message_text', '').strip()
         image_file = request.files.get('image')
-        print(f"DEBUG: Text='{message_text}', Image file={image_file is not None}")
+        print(f"Message text: '{message_text}' (length: {len(message_text)})")
+        print(f"Image file present: {image_file is not None}")
+        if image_file:
+            print(f"Image filename: {image_file.filename}")
+            print(f"Image content type: {image_file.content_type}")
         
         # Require either text or image
         if not message_text and not image_file:
-            print("DEBUG: No text and no image")
+            print("VALIDATION ERROR: No text and no image")
             return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
         
         # Handle image upload if present
         image_filename = None
         if image_file and image_file.filename:
-            print(f"DEBUG: Processing image: {image_file.filename}")
+            print(f"Processing image upload: {image_file.filename}")
             # Check file extension
             allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
             file_ext = image_file.filename.rsplit('.', 1)[1].lower() if '.' in image_file.filename else ''
+            print(f"File extension: {file_ext}")
             
             if file_ext not in allowed_extensions:
-                print(f"DEBUG: Invalid extension: {file_ext}")
-                return jsonify({'success': False, 'message': 'Invalid image format. Allowed: png, jpg, jpeg, gif, webp'}), 400
+                print(f"VALIDATION ERROR: Invalid extension: {file_ext}")
+                return jsonify({'success': False, 'message': f'Invalid image format. Allowed: {", ".join(allowed_extensions)}'}), 400
+            
+            # Check file size (max 5MB)
+            image_file.seek(0, 2)  # Seek to end
+            file_size = image_file.tell()
+            image_file.seek(0)  # Seek back to start
+            print(f"File size: {file_size} bytes ({file_size / 1024 / 1024:.2f} MB)")
+            
+            if file_size > 5 * 1024 * 1024:
+                print("VALIDATION ERROR: File too large")
+                return jsonify({'success': False, 'message': 'Image size must be less than 5MB'}), 400
             
             # Generate unique filename
             image_filename = f"chat_{uuid.uuid4().hex}.{file_ext}"
-            print(f"DEBUG: Generated filename: {image_filename}")
+            print(f"Generated filename: {image_filename}")
             
             # Save image
             upload_folder = os.path.join(app.root_path, 'static', 'uploads')
             os.makedirs(upload_folder, exist_ok=True)
             filepath = os.path.join(upload_folder, image_filename)
+            print(f"Saving to: {filepath}")
+            
             image_file.save(filepath)
-            print(f"DEBUG: Image saved to: {filepath}")
+            
+            # Verify file was saved
+            if os.path.exists(filepath):
+                saved_size = os.path.getsize(filepath)
+                print(f"Image saved successfully! Size: {saved_size} bytes")
+            else:
+                print("ERROR: File was not saved!")
+                return jsonify({'success': False, 'message': 'Failed to save image file'}), 500
         
         # Create message
+        print(f"Creating message object...")
         message = Message(
             conversation_id=conversation_id,
             sender_id=user.id,
@@ -2921,13 +2952,12 @@ def send_message(conversation_id):
         )
         
         conversation.last_message_at = datetime.utcnow()
-        
-        # Update user last activity
         user.last_activity = datetime.utcnow()
         
+        print(f"Saving to database...")
         db.session.add(message)
         db.session.commit()
-        print(f"DEBUG: Message {message.id} saved successfully")
+        print(f"Message {message.id} saved successfully to database")
         
         log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
         
@@ -2942,12 +2972,16 @@ def send_message(conversation_id):
                 'is_own': True
             }
         }
-        print(f"DEBUG: Returning response: {response_data}")
+        print(f"Returning success response")
+        print(f"Response data: {response_data}")
+        print(f"{'='*60}\n")
         return jsonify(response_data)
     except Exception as e:
-        print(f"DEBUG ERROR: {str(e)}")
+        print(f"\n{'!'*60}")
+        print(f"EXCEPTION CAUGHT: {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
+        print(f"{'!'*60}\n")
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
 

@@ -469,26 +469,29 @@
   // Auto-scroll when new message is sent
   function sendMessage(event) {
       event.preventDefault();
-      console.log('SENDING: Starting send process');
+      console.log('═══ SEND MESSAGE START ═══');
 
       const form = event.target;
       const messageInput = document.getElementById('messageInput');
       const imageInput = document.getElementById('imageInput');
-      const messageText = messageInput.value.trim();
-      const hasImage = imageInput.files.length > 0;
+      const messageText = messageInput ? messageInput.value.trim() : '';
+      const hasImage = imageInput ? imageInput.files.length > 0 : false;
       
-      console.log('SENDING: Text:', messageText, 'Has Image:', hasImage);
+      console.log('Message text:', messageText);
+      console.log('Has image:', hasImage);
+      console.log('Image file:', hasImage ? imageInput.files[0].name : 'none');
 
       // Require either text or image
       if (!messageText && !hasImage) {
           alert('Please enter a message or select an image');
+          console.log('═══ VALIDATION FAILED: Empty message ═══');
           return;
       }
 
       // Disable input while sending
-      messageInput.disabled = true;
+      if (messageInput) messageInput.disabled = true;
       const sendBtn = document.getElementById('sendBtn');
-      sendBtn.disabled = true;
+      if (sendBtn) sendBtn.disabled = true;
 
       // Show upload progress if image is present
       if (hasImage) {
@@ -499,11 +502,15 @@
       const formData = new FormData(form);
       const conversationId = {{ conversation.id }};
       
-      console.log('SENDING: FormData created, conversation:', conversationId);
-      console.log('SENDING: FormData entries:');
+      console.log('Conversation ID:', conversationId);
+      console.log('FormData contents:');
+      let formDataEntries = [];
       for (let pair of formData.entries()) {
-          console.log('SENDING:', pair[0], '=', pair[1]);
+          formDataEntries.push(`${pair[0]}: ${pair[1] instanceof File ? pair[1].name + ' (' + pair[1].size + ' bytes)' : pair[1]}`);
+          console.log('  -', pair[0], ':', pair[1] instanceof File ? pair[1].name + ' (' + pair[1].size + ' bytes)' : pair[1]);
       }
+      
+      console.log('Sending POST to /messages/send/' + conversationId);
 
       fetch(`/messages/send/${conversationId}`, {
           method: 'POST',
@@ -513,50 +520,62 @@
           }
       })
       .then(response => {
-          console.log('SENDING: Response received, status:', response.status);
+          console.log('Response status:', response.status);
+          console.log('Response OK:', response.ok);
           if (!response.ok) {
               return response.json().then(data => {
+                  console.log('Error response data:', data);
                   throw new Error(data.message || `HTTP error! status: ${response.status}`);
+              }).catch(jsonError => {
+                  // If JSON parsing fails, throw generic error
+                  console.log('Failed to parse error response:', jsonError);
+                  throw new Error(`HTTP error! status: ${response.status}`);
               });
           }
           return response.json();
       })
       .then(data => {
-          console.log('SENDING: Data parsed:', data);
+          console.log('Success response data:', data);
           if (data.success) {
-              console.log('SENDING: Success! Reloading page...');
+              console.log('Message sent successfully!');
               // Clear form
-              messageInput.value = '';
-              imageInput.value = '';
+              if (messageInput) messageInput.value = '';
+              if (imageInput) imageInput.value = '';
               removeImagePreview();
               
               // Re-enable inputs
-              messageInput.disabled = false;
-              sendBtn.disabled = false;
+              if (messageInput) messageInput.disabled = false;
+              if (sendBtn) sendBtn.disabled = false;
               
               // Hide progress
               const progressDiv = document.getElementById('uploadProgress');
               if (progressDiv) progressDiv.style.display = 'none';
               
               // Reload page to show new message with proper formatting
+              console.log('Reloading page...');
               location.reload();
           } else {
-              console.log('SENDING: Failed:', data.message);
+              console.log('Server returned success=false:', data.message);
               alert('Failed to send message: ' + (data.message || 'Unknown error'));
-              messageInput.disabled = false;
-              sendBtn.disabled = false;
+              if (messageInput) messageInput.disabled = false;
+              if (sendBtn) sendBtn.disabled = false;
               const progressDiv = document.getElementById('uploadProgress');
               if (progressDiv) progressDiv.style.display = 'none';
           }
       })
       .catch(error => {
-          console.error('SENDING: Error caught:', error);
+          console.error('═══ ERROR CAUGHT ═══');
+          console.error('Error:', error);
+          console.error('Error message:', error.message);
+          console.error('Error stack:', error.stack);
           alert('Failed to send message: ' + error.message);
-          messageInput.disabled = false;
-          sendBtn.disabled = false;
+          if (messageInput) messageInput.disabled = false;
+          if (sendBtn) sendBtn.disabled = false;
           const progressDiv = document.getElementById('uploadProgress');
           if (progressDiv) progressDiv.style.display = 'none';
       });
+      
+      console.log('═══ Fetch request sent, waiting for response... ═══');
   }
 
   // Image preview function
