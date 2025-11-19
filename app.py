@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_mail import Mail, Message
+from flask_mail import Mail, Message as MailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
@@ -31,9 +31,12 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False  # Add this
 app.config['MAIL_USERNAME'] = 'reynaldo.yasona06@gmail.com'
-app.config['MAIL_PASSWORD'] = 'urantilhbyppxpqe'
-app.config['MAIL_DEFAULT_SENDER'] = 'Epicuremart <noreply@epicuremart.com>'
+app.config['MAIL_PASSWORD'] = 'urantilhbyppxpqe'  # Use valid app password
+app.config['MAIL_DEFAULT_SENDER'] = ('Epicuremart', 'reynaldo.yasona06@gmail.com')  # Change this
+app.config['MAIL_MAX_EMAILS'] = None  # Add this
+app.config['MAIL_ASCII_ATTACHMENTS'] = False  # Add this
 
 db = SQLAlchemy(app)
 mail = Mail(app)
@@ -378,14 +381,21 @@ def log_action(action, entity_type=None, entity_id=None, details=None):
 
 
 def send_email(to, subject, body):
-    """Send email notification"""
+    """Send email notification with better error handling"""
     try:
-        msg = Message(subject, recipients=[to])
-        msg.body = body
+        msg = MailMessage(
+            subject=subject,
+            recipients=[to],
+            body=body,
+            sender=app.config['MAIL_DEFAULT_SENDER']
+        )
         mail.send(msg)
+        print(f"✅ Email sent successfully to {to}")
         return True
     except Exception as e:
-        print(f"Email error: {e}")
+        print(f"❌ Email error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
