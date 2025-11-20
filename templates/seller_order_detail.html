@@ -85,7 +85,7 @@
                                 <option value="">-- Let any courier pickup --</option>
                                 {% for courier in available_couriers %}
                                 <option value="{{ courier.id }}">
-                                    {{ courier.full_name or courier.email }} 
+                                    {{ courier.company_name or courier.full_name or courier.email }} 
                                     {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}
                                 </option>
                                 {% endfor %}
@@ -121,7 +121,7 @@
                                 <option value="">-- Select Courier --</option>
                                 {% for courier in available_couriers %}
                                 <option value="{{ courier.id }}" {% if order.courier_id == courier.id %}selected{% endif %}>
-                                    {{ courier.full_name or courier.email }}
+                                    {{ courier.company_name or courier.full_name or courier.email }}
                                     {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}
                                 </option>
                                 {% endfor %}
@@ -189,7 +189,7 @@
                         </div>
                         {% endif %}
                         <div class="flex-grow-1">
-                            <h6 class="mb-1">{{ courier_info.full_name }}</h6>
+                            <h6 class="mb-1">{{ courier_info.company_name or courier_info.full_name }}</h6>
                             <p class="text-muted small mb-0">
                                 <i class="fas fa-envelope me-1"></i>{{ courier_info.email }}
                             </p>
@@ -207,7 +207,7 @@
                     </div>
                     {% else %}
                     <p class="mb-2">
-                        <strong>Courier:</strong> {{ order.courier.full_name or order.courier.email }}
+                        <strong>Courier:</strong> {{ order.courier.company_name or order.courier.full_name or order.courier.email }}
                     </p>
                     {% endif %}
                     <a href="{{ url_for('start_courier_conversation', order_id=order.id) }}" class="btn btn-primary w-100">

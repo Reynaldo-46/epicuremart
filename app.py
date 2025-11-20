@@ -89,7 +89,8 @@ class User(db.Model):
     is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
     quick_reply_templates = db.Column(db.Text)  # JSON string of quick reply templates
-    courier_company_id = db.Column(db.Integer, db.ForeignKey('users.id'))  # Courier company that rider belongs to (for riders only)
+    company_name = db.Column(db.String(200))  # Company name for courier companies
+    courier_id = db.Column(db.Integer, db.ForeignKey('users.id'))  # Courier company that rider belongs to (for riders only)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -97,7 +98,7 @@ class User(db.Model):
     addresses = db.relationship('Address', backref='user', cascade='all, delete-orphan')
     orders = db.relationship('Order', backref='customer', foreign_keys='Order.customer_id')
     cart_items = db.relationship('CartItem', backref='user', cascade='all, delete-orphan')
-    riders = db.relationship('User', backref=db.backref('courier_company', remote_side='User.id'), foreign_keys=[courier_company_id])
+    riders = db.relationship('User', backref=db.backref('courier_company', remote_side='User.id'), foreign_keys=[courier_id])
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -718,7 +719,8 @@ def register():
         # Rider/Courier specific fields
         plate_number = request.form.get('plate_number', '')
         vehicle_type = request.form.get('vehicle_type', '')
-        courier_company_id = request.form.get('courier_company_id', '')
+        courier_id = request.form.get('courier_id', '')
+        company_name = request.form.get('company_name', '')
         
         # Validate password match
         if password != confirm_password:
@@ -732,6 +734,16 @@ def register():
         # Phone validation - required for riders and customers
         if role in ['customer', 'rider', 'courier'] and not phone:
             flash('Contact number is required for this role.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Validate company name for couriers
+        if role == 'courier' and not company_name:
+            flash('Company name is required for couriers.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Validate courier selection for riders
+        if role == 'rider' and not courier_id:
+            flash('Please select a courier company.', 'danger')
             return redirect(url_for('register'))
         
         # Sellers, couriers, riders need admin approval
@@ -751,7 +763,8 @@ def register():
             plate_number=plate_number,
             vehicle_type=vehicle_type,
             is_approved=is_approved,
-            courier_company_id=int(courier_company_id) if courier_company_id and role == 'rider' else None
+            company_name=company_name if role == 'courier' else None,
+            courier_id=int(courier_id) if courier_id and role == 'rider' else None
         )
         user.set_password(password)
         
@@ -1692,6 +1705,7 @@ def customer_order_detail(order_id):
         courier = User.query.get(order.courier_id)
         courier_info = {
             'id': courier.id,
+            'company_name': courier.company_name,
             'full_name': courier.full_name or courier.email,
             'email': courier.email,
             'phone': courier.phone,
@@ -1871,7 +1885,7 @@ def get_riders_by_courier(courier_id):
     riders = User.query.filter_by(
         role='rider',
         is_approved=True,
-        courier_company_id=courier_id
+        courier_id=courier_id
     ).all()
     
     riders_data = []
@@ -2384,7 +2398,7 @@ def seller_order_detail(order_id):
         available_riders = User.query.filter_by(
             role='rider', 
             is_approved=True,
-            courier_company_id=order.courier_id
+            courier_id=order.courier_id
         ).all()
     else:
         available_riders = User.query.filter_by(role='rider', is_approved=True).all()
@@ -2414,6 +2428,7 @@ def seller_order_detail(order_id):
         courier = User.query.get(order.courier_id)
         courier_info = {
             'id': courier.id,
+            'company_name': courier.company_name,
             'full_name': courier.full_name or courier.email,
             'email': courier.email,
             'phone': courier.phone,
@@ -2567,7 +2582,7 @@ def assign_delivery_personnel(order_id):
             rider = User.query.filter_by(id=rider_id, role='rider', is_approved=True).first()
             if rider:
                 # Verify rider belongs to selected courier if courier is assigned
-                if order.courier_id and rider.courier_company_id != order.courier_id:
+                if order.courier_id and rider.courier_id != order.courier_id:
                     flash('Selected rider does not belong to the assigned courier company.', 'warning')
                 else:
                     order.rider_id = rider_id

@@ -22,7 +22,8 @@
                                 <option value="">-- Select Role --</option>
                                 <option value="customer">Buyer - Browse and buy products</option>
                                 <option value="seller">Seller - Sell my products (requires approval)</option>
-                                <option value="rider">Rider / Courier - Deliver orders (requires approval)</option>
+                                <option value="courier">Courier Company - Manage deliveries (requires approval)</option>
+                                <option value="rider">Rider - Deliver orders for a courier company (requires approval)</option>
                             </select>
                             <small class="form-text text-muted" id="roleInfo"></small>
                         </div>
@@ -73,13 +74,21 @@
                             </div>
                         </div>
                         
+                        <!-- Company Name (shown for Courier only) -->
+                        <div class="mb-4 d-none" id="companyNameSection">
+                            <label class="form-label fw-bold">Company Name *</label>
+                            <input type="text" name="company_name" class="form-control" id="companyNameInput"
+                                   placeholder="e.g., J&T Express, Lalamove, NinjaVan">
+                            <small class="form-text text-muted">Enter your courier company name</small>
+                        </div>
+                        
                         <!-- Courier Company Selection (shown for Rider only) -->
                         <div class="mb-4 d-none" id="courierCompanySection">
                             <label class="form-label fw-bold">Select Courier Company *</label>
-                            <select name="courier_company_id" class="form-select" id="courierCompanySelect">
+                            <select name="courier_id" class="form-select" id="courierCompanySelect">
                                 <option value="">-- Select Courier Company --</option>
                                 {% for courier in couriers %}
-                                <option value="{{ courier.id }}">{{ courier.full_name or courier.email }} {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}</option>
+                                <option value="{{ courier.id }}">{{ courier.company_name or courier.full_name }} {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}</option>
                                 {% endfor %}
                             </select>
                             <small class="form-text text-muted">Choose which courier company you will be working with</small>
@@ -310,6 +319,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     const vehicleDetailsSection = document.getElementById('vehicleDetailsSection');
     const plateNumberInput = document.getElementById('plateNumberInput');
     const vehicleTypeInput = document.getElementById('vehicleTypeInput');
+    const companyNameSection = document.getElementById('companyNameSection');
+    const companyNameInput = document.getElementById('companyNameInput');
     const courierCompanySection = document.getElementById('courierCompanySection');
     const courierCompanySelect = document.getElementById('courierCompanySelect');
     const phoneInput = document.getElementById('phoneInput');
@@ -319,7 +330,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     const messages = {
         'customer': 'Start shopping immediately after email verification. ID upload is optional but recommended for verification.',
         'seller': 'Requires admin approval, ID, and business permit upload. You\'ll receive an email when approved.',
-        'rider': 'Requires admin approval, ID, driver\'s license, and OR/CR upload. Join our delivery network today.'
+        'courier': 'Requires admin approval, ID, driver\'s license, and OR/CR upload. Register your courier company.',
+        'rider': 'Requires admin approval, ID, driver\'s license, and OR/CR upload. Join a courier company to deliver orders.'
     };
     
     roleInfo.textContent = messages[value] || '';
@@ -336,6 +348,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     vehicleDetailsSection.classList.add('d-none');
     plateNumberInput.required = false;
     vehicleTypeInput.required = false;
+    companyNameSection.classList.add('d-none');
+    companyNameInput.required = false;
     courierCompanySection.classList.add('d-none');
     courierCompanySelect.required = false;
     
@@ -376,6 +390,20 @@ document.getElementById('roleSelect').addEventListener('change', function() {
         vehicleTypeInput.required = true;
         courierCompanySection.classList.remove('d-none');
         courierCompanySelect.required = true;
+    } else if (value === 'courier') {
+        idUploadSection.classList.remove('d-none');
+        idDocumentInput.required = true;
+        idRequiredLabel.textContent = ' *';
+        idUploadHelp.textContent = 'Upload a valid government-issued ID (Required)';
+        driversLicenseSection.classList.remove('d-none');
+        driversLicenseInput.required = true;
+        orCrSection.classList.remove('d-none');
+        orCrInput.required = true;
+        vehicleDetailsSection.classList.remove('d-none');
+        plateNumberInput.required = true;
+        vehicleTypeInput.required = true;
+        companyNameSection.classList.remove('d-none');
+        companyNameInput.required = true;
     }
 });
 
