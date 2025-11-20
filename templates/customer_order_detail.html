@@ -145,10 +145,11 @@
           
           <!-- Chat with Seller Button -->
           {% if order.status in ['PENDING_PAYMENT', 'READY_FOR_PICKUP', 'DELIVERED'] %}
-          <a href="{{ url_for('start_conversation', shop_id=order.shop_id) }}" 
-             class="btn btn-primary btn-sm w-100 mt-3">
-            <i class="fas fa-comment-dots me-1"></i>Chat with Seller
-          </a>
+          <form method="POST" action="{{ url_for('start_conversation', shop_id=order.shop_id) }}">
+            <button type="submit" class="btn btn-primary w-100 mb-2">
+              <i class="fas fa-comments me-2"></i>Chat with Seller
+            </button>
+          </form>
           {% endif %}
         </div>
       </div>
@@ -215,10 +216,11 @@
           {% endif %}
           
           <!-- Chat with Rider Button -->
-          <a href="{{ url_for('start_conversation_with_rider', order_id=order.id) }}" 
-             class="btn btn-primary btn-sm w-100 mt-3">
-            <i class="fas fa-comment-dots me-1"></i>Chat with Rider
-          </a>
+          <form method="POST" action="{{ url_for('start_conversation_with_rider', order_id=order.id) }}">
+            <button type="submit" class="btn btn-success w-100 mb-0">
+              <i class="fas fa-motorcycle me-2"></i>Chat with Rider
+            </button>
+          </form>
           
           <!-- Rate Rider Button -->
           {% if order.status == 'DELIVERED' and not has_rider_feedback %}
@@ -272,10 +274,11 @@
           </div>
           
           <!-- Chat with Courier Button -->
-          <a href="{{ url_for('start_conversation_with_courier', order_id=order.id) }}" 
-             class="btn btn-primary btn-sm w-100">
-            <i class="fas fa-comment-dots me-1"></i>Chat with Courier
-          </a>
+          <form method="POST" action="{{ url_for('start_conversation_with_courier', order_id=order.id) }}">
+            <button type="submit" class="btn btn-info w-100 mb-2">
+              <i class="fas fa-truck me-2"></i>Chat with Courier
+            </button>
+          </form>
         </div>
       </div>
       {% endif %}
