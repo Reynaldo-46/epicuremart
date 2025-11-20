@@ -153,6 +153,161 @@
         </div>
       </div>
 
+      <!-- Courier Information -->
+      {% if courier_info %}
+      <div class="card mb-4">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0"><i class="fas fa-truck me-2"></i>Courier Information</h5>
+        </div>
+        <div class="card-body">
+          <div class="d-flex align-items-center mb-3">
+            {% if courier_info.profile_picture %}
+            <img src="{{ url_for('static', filename='uploads/' + courier_info.profile_picture) }}" 
+                 alt="{{ courier_info.full_name or courier_info.email }}" 
+                 class="rounded-circle me-3"
+                 style="width: 60px; height: 60px; object-fit: cover;">
+            {% else %}
+            <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                 style="width: 60px; height: 60px; font-size: 24px;">
+              <i class="fas fa-user"></i>
+            </div>
+            {% endif %}
+            <div>
+              <h6 class="mb-1">{{ courier_info.full_name or courier_info.email }}</h6>
+              <p class="text-muted small mb-0">Courier</p>
+            </div>
+          </div>
+          <p class="mb-2">
+            <i class="fas fa-envelope me-2"></i>
+            <a href="mailto:{{ courier_info.email }}">{{ courier_info.email }}</a>
+          </p>
+          {% if courier_info.phone %}
+          <p class="mb-0">
+            <i class="fas fa-phone me-2"></i>
+            <a href="tel:{{ courier_info.phone }}">{{ courier_info.phone }}</a>
+          </p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Rider Information -->
+      {% if rider_info and order.status in ['OUT_FOR_DELIVERY', 'DELIVERED'] %}
+      <div class="card mb-4">
+        <div class="card-header bg-success text-white">
+          <h5 class="mb-0"><i class="fas fa-motorcycle me-2"></i>Rider Information</h5>
+        </div>
+        <div class="card-body">
+          <div class="d-flex align-items-center mb-3">
+            {% if rider_info.profile_picture %}
+            <img src="{{ url_for('static', filename='uploads/' + rider_info.profile_picture) }}" 
+                 alt="{{ rider_info.full_name or rider_info.email }}" 
+                 class="rounded-circle me-3"
+                 style="width: 60px; height: 60px; object-fit: cover;">
+            {% else %}
+            <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                 style="width: 60px; height: 60px; font-size: 24px;">
+              <i class="fas fa-user"></i>
+            </div>
+            {% endif %}
+            <div>
+              <h6 class="mb-1">{{ rider_info.full_name or rider_info.email }}</h6>
+              <p class="text-muted small mb-0">Rider</p>
+              {% if rider_avg_rating %}
+              <div class="text-warning">
+                <i class="fas fa-star"></i> {{ "%.1f"|format(rider_avg_rating) }}
+                <span class="text-muted small">({{ rider_recent_feedback|length }} reviews)</span>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          <p class="mb-2">
+            <i class="fas fa-envelope me-2"></i>
+            <a href="mailto:{{ rider_info.email }}">{{ rider_info.email }}</a>
+          </p>
+          {% if rider_info.phone %}
+          <p class="mb-3">
+            <i class="fas fa-phone me-2"></i>
+            <a href="tel:{{ rider_info.phone }}">{{ rider_info.phone }}</a>
+          </p>
+          {% endif %}
+          
+          <!-- Recent Feedback -->
+          {% if rider_recent_feedback %}
+          <hr>
+          <h6 class="mb-3">Recent Feedback</h6>
+          {% for feedback in rider_recent_feedback[:3] %}
+          <div class="mb-2 pb-2 {% if not loop.last %}border-bottom{% endif %}">
+            <div class="d-flex justify-content-between align-items-start mb-1">
+              <div class="text-warning small">
+                {% for i in range(feedback.rating) %}
+                <i class="fas fa-star"></i>
+                {% endfor %}
+                {% for i in range(5 - feedback.rating) %}
+                <i class="far fa-star"></i>
+                {% endfor %}
+              </div>
+              <small class="text-muted">{{ feedback.created_at.strftime('%b %d, %Y') }}</small>
+            </div>
+            {% if feedback.feedback_text %}
+            <p class="small mb-0 text-muted">{{ feedback.feedback_text[:100] }}{% if feedback.feedback_text|length > 100 %}...{% endif %}</p>
+            {% endif %}
+          </div>
+          {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Rider Feedback Form (After Delivery) -->
+      {% if order.status == 'DELIVERED' and order.rider_id and not existing_rider_feedback %}
+      <div class="card mb-4">
+        <div class="card-header bg-warning text-dark">
+          <h5 class="mb-0"><i class="fas fa-star me-2"></i>Rate Your Rider</h5>
+        </div>
+        <div class="card-body">
+          <form method="POST" action="{{ url_for('submit_rider_feedback', order_id=order.id) }}">
+            <div class="mb-3">
+              <label class="form-label fw-bold">Rating *</label>
+              <div class="rider-rating-input" id="riderRating">
+                {% for i in range(5, 0, -1) %}
+                <input type="radio" name="rider_rating" value="{{ i }}" id="riderStar{{ i }}" required />
+                <label for="riderStar{{ i }}"><i class="fas fa-star"></i></label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-bold">Feedback (Optional)</label>
+              <textarea name="rider_feedback_text" class="form-control" rows="3" 
+                        placeholder="Share your experience with the rider..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-warning w-100">
+              <i class="fas fa-paper-plane me-2"></i>Submit Feedback
+            </button>
+          </form>
+        </div>
+      </div>
+      {% elif existing_rider_feedback %}
+      <div class="card mb-4">
+        <div class="card-header bg-success text-white">
+          <h5 class="mb-0"><i class="fas fa-check-circle me-2"></i>Your Rider Feedback</h5>
+        </div>
+        <div class="card-body">
+          <div class="text-warning mb-2">
+            {% for i in range(existing_rider_feedback.rating) %}
+            <i class="fas fa-star"></i>
+            {% endfor %}
+            {% for i in range(5 - existing_rider_feedback.rating) %}
+            <i class="far fa-star"></i>
+            {% endfor %}
+          </div>
+          {% if existing_rider_feedback.feedback_text %}
+          <p class="mb-0">{{ existing_rider_feedback.feedback_text }}</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
       <!-- Chat Buttons -->
       <div class="card mb-4">
         <div class="card-header bg-light">
@@ -307,18 +462,18 @@
 {% endfor %}
 
 <style>
-  .rating-input {
+  .rating-input, .rider-rating-input {
     display: inline-flex;
     flex-direction: row-reverse;
     justify-content: center;
     gap: 0.5rem;
   }
 
-  .rating-input input {
+  .rating-input input, .rider-rating-input input {
     display: none;
   }
 
-  .rating-input label {
+  .rating-input label, .rider-rating-input label {
     cursor: pointer;
     font-size: 2.5rem;
     color: #e2e8f0;
@@ -327,7 +482,10 @@
 
   .rating-input input:checked ~ label,
   .rating-input label:hover,
-  .rating-input label:hover ~ label {
+  .rating-input label:hover ~ label,
+  .rider-rating-input input:checked ~ label,
+  .rider-rating-input label:hover,
+  .rider-rating-input label:hover ~ label {
     color: #fbbf24;
   }
 

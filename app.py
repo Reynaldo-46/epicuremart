@@ -301,6 +301,22 @@ class Message(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
+
+
+class RiderFeedback(db.Model):
+    __tablename__ = 'rider_feedback'
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
+    rider_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False)  # 1-5 stars
+    feedback_text = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    order = db.relationship('Order', backref='rider_feedback')
+    rider = db.relationship('User', foreign_keys=[rider_id])
+    customer = db.relationship('User', foreign_keys=[customer_id])
     
 # ==================== HELPER FUNCTIONS ====================
 
@@ -1416,10 +1432,44 @@ def customer_order_detail(order_id):
                 'review': existing_review
             })
     
+    # Get rider information and feedback
+    rider_info = None
+    rider_avg_rating = None
+    rider_recent_feedback = []
+    existing_rider_feedback = None
+    
+    if order.rider_id:
+        rider = User.query.get(order.rider_id)
+        if rider:
+            rider_info = rider
+            
+            # Calculate average rating for rider
+            all_feedback = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+            if all_feedback:
+                rider_avg_rating = sum(f.rating for f in all_feedback) / len(all_feedback)
+                # Get last 3 feedback items
+                rider_recent_feedback = RiderFeedback.query.filter_by(rider_id=order.rider_id).order_by(RiderFeedback.created_at.desc()).limit(3).all()
+            
+            # Check if customer already left feedback for this order
+            existing_rider_feedback = RiderFeedback.query.filter_by(
+                order_id=order.id,
+                customer_id=session['user_id']
+            ).first()
+    
+    # Get courier information
+    courier_info = None
+    if order.courier_id:
+        courier_info = User.query.get(order.courier_id)
+    
     return render_template('customer_order_detail.html', 
         order=order, 
         qr_data=qr_data,
-        reviewable_items=reviewable_items
+        reviewable_items=reviewable_items,
+        rider_info=rider_info,
+        rider_avg_rating=rider_avg_rating,
+        rider_recent_feedback=rider_recent_feedback,
+        existing_rider_feedback=existing_rider_feedback,
+        courier_info=courier_info
     )
 
 
@@ -1474,6 +1524,58 @@ def add_product_review(product_id):
     
     log_action('PRODUCT_REVIEWED', 'ProductReview', review.id, f'{rating} stars')
     flash('Thank you for your review!', 'success')
+    return redirect(url_for('customer_order_detail', order_id=order_id))
+
+
+@app.route('/submit-rider-feedback/<int:order_id>', methods=['POST'])
+@login_required
+@role_required('customer')
+def submit_rider_feedback(order_id):
+    order = Order.query.get_or_404(order_id)
+    
+    # Verify order belongs to customer and is delivered
+    if order.customer_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('customer_orders'))
+    
+    if order.status != 'DELIVERED':
+        flash('You can only rate the rider after delivery is complete.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    if not order.rider_id:
+        flash('No rider assigned to this order.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    # Check if feedback already exists
+    existing = RiderFeedback.query.filter_by(
+        order_id=order_id,
+        customer_id=session['user_id']
+    ).first()
+    
+    if existing:
+        flash('You have already provided feedback for this rider.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    rating = request.form.get('rider_rating')
+    feedback_text = request.form.get('rider_feedback_text', '').strip()
+    
+    if not rating:
+        flash('Please provide a rating.', 'danger')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    feedback = RiderFeedback(
+        order_id=order_id,
+        rider_id=order.rider_id,
+        customer_id=session['user_id'],
+        rating=int(rating),
+        feedback_text=feedback_text if feedback_text else None
+    )
+    
+    db.session.add(feedback)
+    db.session.commit()
+    
+    log_action('RIDER_FEEDBACK_SUBMITTED', 'RiderFeedback', feedback.id, f'{rating} stars for rider {order.rider_id}')
+    flash('Thank you for your feedback!', 'success')
     return redirect(url_for('customer_order_detail', order_id=order_id))
 
 
@@ -2025,7 +2127,28 @@ def seller_order_detail(order_id):
     if order.status == 'READY_FOR_PICKUP' and order.pickup_token:
         qr_data = generate_qr_code(order.pickup_token)
     
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data)
+    # Get courier information
+    courier_info = None
+    if order.courier_id:
+        courier_info = User.query.get(order.courier_id)
+    
+    # Get rider information and their rating
+    rider_info = None
+    rider_avg_rating = None
+    if order.rider_id:
+        rider_info = User.query.get(order.rider_id)
+        # Calculate average rating for rider
+        all_feedback = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+        if all_feedback:
+            rider_avg_rating = sum(f.rating for f in all_feedback) / len(all_feedback)
+    
+    return render_template('seller_order_detail.html', 
+        order=order, 
+        qr_data=qr_data,
+        courier_info=courier_info,
+        rider_info=rider_info,
+        rider_avg_rating=rider_avg_rating
+    )
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
