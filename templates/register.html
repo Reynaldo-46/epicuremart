@@ -73,6 +73,18 @@
                             </div>
                         </div>
                         
+                        <!-- Courier Company Selection (shown for Rider only) -->
+                        <div class="mb-4 d-none" id="courierCompanySection">
+                            <label class="form-label fw-bold">Select Courier Company *</label>
+                            <select name="courier_company_id" class="form-select" id="courierCompanySelect">
+                                <option value="">-- Select Courier Company --</option>
+                                {% for courier in couriers %}
+                                <option value="{{ courier.id }}">{{ courier.full_name or courier.email }} {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}</option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Choose which courier company you will be working with</small>
+                        </div>
+                        
                         <!-- Name Fields -->
                         <div class="row">
                             <div class="col-md-4 mb-3">
@@ -298,6 +310,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     const vehicleDetailsSection = document.getElementById('vehicleDetailsSection');
     const plateNumberInput = document.getElementById('plateNumberInput');
     const vehicleTypeInput = document.getElementById('vehicleTypeInput');
+    const courierCompanySection = document.getElementById('courierCompanySection');
+    const courierCompanySelect = document.getElementById('courierCompanySelect');
     const phoneInput = document.getElementById('phoneInput');
     const phoneLabel = document.getElementById('phoneLabel');
     const value = this.value;
@@ -322,6 +336,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
     vehicleDetailsSection.classList.add('d-none');
     plateNumberInput.required = false;
     vehicleTypeInput.required = false;
+    courierCompanySection.classList.add('d-none');
+    courierCompanySelect.required = false;
     
     // Update phone requirement based on role
     if (value === 'customer' || value === 'rider' || value === 'courier') {
@@ -358,6 +374,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
         vehicleDetailsSection.classList.remove('d-none');
         plateNumberInput.required = true;
         vehicleTypeInput.required = true;
+        courierCompanySection.classList.remove('d-none');
+        courierCompanySelect.required = true;
     }
 });
 

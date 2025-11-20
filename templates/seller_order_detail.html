@@ -102,6 +102,70 @@
                 </div>
             </div>
 
+            <!-- Assign Courier and Rider -->
+            {% if order.status in ['PENDING_PAYMENT', 'READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'] %}
+            <div class="card mb-4">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-user-plus"></i> Assign Delivery Personnel
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('assign_delivery_personnel', order_id=order.id) }}" id="assignmentForm">
+                        <!-- Courier Assignment -->
+                        <div class="mb-3">
+                            <label for="courierAssign" class="form-label fw-bold">
+                                <i class="fas fa-truck"></i> Assign Courier
+                            </label>
+                            <select name="courier_id" id="courierAssign" class="form-select">
+                                <option value="">-- Select Courier --</option>
+                                {% for courier in available_couriers %}
+                                <option value="{{ courier.id }}" {% if order.courier_id == courier.id %}selected{% endif %}>
+                                    {{ courier.full_name or courier.email }}
+                                    {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if order.courier_id %}
+                            <small class="text-success">
+                                <i class="fas fa-check-circle"></i> Currently assigned
+                            </small>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Rider Assignment -->
+                        <div class="mb-3">
+                            <label for="riderAssign" class="form-label fw-bold">
+                                <i class="fas fa-motorcycle"></i> Assign Rider
+                            </label>
+                            <select name="rider_id" id="riderAssign" class="form-select">
+                                <option value="">-- Select Rider --</option>
+                                {% for rider in available_riders %}
+                                <option value="{{ rider.id }}" {% if order.rider_id == rider.id %}selected{% endif %}
+                                        data-courier="{{ rider.courier_company_id or '' }}">
+                                    {{ rider.full_name or rider.email }}
+                                    {% if rider.vehicle_type %}({{ rider.vehicle_type }}){% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if order.rider_id %}
+                            <small class="text-success">
+                                <i class="fas fa-check-circle"></i> Currently assigned
+                            </small>
+                            {% endif %}
+                            <small class="text-muted d-block mt-1">
+                                <i class="fas fa-info-circle"></i> Only riders from selected courier will be shown
+                            </small>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="fas fa-check"></i> Update Assignment
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Chat with Courier -->
             {% if order.courier_id %}
             <div class="card mb-4">
@@ -266,4 +330,47 @@
     </div>
 </div>
 {% endif %}
+
+<script>
+// Filter riders based on selected courier
+document.addEventListener('DOMContentLoaded', function() {
+    const courierSelect = document.getElementById('courierAssign');
+    const riderSelect = document.getElementById('riderAssign');
+    
+    if (courierSelect && riderSelect) {
+        const allRiderOptions = Array.from(riderSelect.options);
+        
+        courierSelect.addEventListener('change', function() {
+            const selectedCourierId = this.value;
+            
+            // Clear current options except first one
+            riderSelect.innerHTML = '<option value="">-- Select Rider --</option>';
+            
+            // If no courier selected, show all riders
+            if (!selectedCourierId) {
+                allRiderOptions.slice(1).forEach(option => {
+                    riderSelect.appendChild(option.cloneNode(true));
+                });
+                return;
+            }
+            
+            // Fetch riders for selected courier via AJAX
+            fetch(`/api/riders-by-courier/${selectedCourierId}`)
+                .then(response => response.json())
+                .then(data => {
+                    data.riders.forEach(rider => {
+                        const option = document.createElement('option');
+                        option.value = rider.id;
+                        option.textContent = `${rider.full_name}${rider.vehicle_type ? ' (' + rider.vehicle_type + ')' : ''}`;
+                        riderSelect.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching riders:', error);
+                });
+        });
+    }
+});
+</script>
+
 {% endblock %}

@@ -89,6 +89,7 @@ class User(db.Model):
     is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
     quick_reply_templates = db.Column(db.Text)  # JSON string of quick reply templates
+    courier_company_id = db.Column(db.Integer, db.ForeignKey('users.id'))  # Courier company that rider belongs to (for riders only)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -96,6 +97,7 @@ class User(db.Model):
     addresses = db.relationship('Address', backref='user', cascade='all, delete-orphan')
     orders = db.relationship('Order', backref='customer', foreign_keys='Order.customer_id')
     cart_items = db.relationship('CartItem', backref='user', cascade='all, delete-orphan')
+    riders = db.relationship('User', backref=db.backref('courier_company', remote_side='User.id'), foreign_keys=[courier_company_id])
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -716,6 +718,7 @@ def register():
         # Rider/Courier specific fields
         plate_number = request.form.get('plate_number', '')
         vehicle_type = request.form.get('vehicle_type', '')
+        courier_company_id = request.form.get('courier_company_id', '')
         
         # Validate password match
         if password != confirm_password:
@@ -747,7 +750,8 @@ def register():
             phone=phone,
             plate_number=plate_number,
             vehicle_type=vehicle_type,
-            is_approved=is_approved
+            is_approved=is_approved,
+            courier_company_id=int(courier_company_id) if courier_company_id and role == 'rider' else None
         )
         user.set_password(password)
         
@@ -874,7 +878,9 @@ def register():
         flash('Registration successful! Please check your email for your verification code.', 'success')
         return redirect(url_for('verify_email_code', user_id=user.id))
     
-    return render_template('register.html')
+    # Get list of approved couriers for rider registration
+    couriers = User.query.filter_by(role='courier', is_approved=True).all()
+    return render_template('register.html', couriers=couriers)
 
 
 @app.route('/verify-email/<token>')
@@ -1859,6 +1865,43 @@ def get_rider_rating(rider_id):
     })
 
 
+@app.route('/api/riders-by-courier/<int:courier_id>')
+def get_riders_by_courier(courier_id):
+    """Get list of riders associated with a specific courier company"""
+    riders = User.query.filter_by(
+        role='rider',
+        is_approved=True,
+        courier_company_id=courier_id
+    ).all()
+    
+    riders_data = []
+    for rider in riders:
+        riders_data.append({
+            'id': rider.id,
+            'full_name': rider.full_name or rider.email,
+            'email': rider.email,
+            'phone': rider.phone,
+            'vehicle_type': rider.vehicle_type
+        })
+    
+    return jsonify({'riders': riders_data})
+    total_feedbacks = len(feedbacks)
+    
+    recent_feedbacks = []
+    for f in feedbacks[:5]:  # Get last 5 feedback items
+        recent_feedbacks.append({
+            'rating': f.rating,
+            'feedback_text': f.feedback_text,
+            'created_at': f.created_at.strftime('%B %d, %Y')
+        })
+    
+    return jsonify({
+        'avg_rating': round(avg_rating, 1),
+        'total_feedbacks': total_feedbacks,
+        'recent_feedbacks': recent_feedbacks
+    })
+
+
 # @app.route('/customer/order/<int:order_id>')
 # @login_required
 # @role_required('customer')
@@ -2336,6 +2379,16 @@ def seller_order_detail(order_id):
     # Get available couriers for selection
     available_couriers = User.query.filter_by(role='courier', is_approved=True).all()
     
+    # Get available riders (if courier is already assigned, filter by that courier)
+    if order.courier_id:
+        available_riders = User.query.filter_by(
+            role='rider', 
+            is_approved=True,
+            courier_company_id=order.courier_id
+        ).all()
+    else:
+        available_riders = User.query.filter_by(role='rider', is_approved=True).all()
+    
     # Get rider information if rider is assigned
     rider_info = None
     if order.rider_id:
@@ -2372,6 +2425,7 @@ def seller_order_detail(order_id):
         order=order, 
         qr_data=qr_data, 
         available_couriers=available_couriers,
+        available_riders=available_riders,
         rider_info=rider_info,
         courier_info=courier_info
     )
@@ -2444,6 +2498,119 @@ def mark_order_ready(order_id):
     )
     
     flash('Order marked as ready for pickup!', 'success')
+    return redirect(url_for('seller_order_detail', order_id=order_id))
+
+
+@app.route('/seller/order/<int:order_id>/assign-delivery', methods=['POST'])
+@login_required
+@role_required('seller')
+def assign_delivery_personnel(order_id):
+    """Assign courier and/or rider to an order"""
+    user = User.query.get(session['user_id'])
+    order = Order.query.get_or_404(order_id)
+    
+    if order.shop_id != user.shop.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('seller_orders'))
+    
+    courier_id = request.form.get('courier_id')
+    rider_id = request.form.get('rider_id')
+    
+    # Assign courier if provided
+    if courier_id and courier_id.strip():
+        try:
+            courier_id = int(courier_id)
+            courier = User.query.filter_by(id=courier_id, role='courier', is_approved=True).first()
+            if courier:
+                order.courier_id = courier_id
+                
+                # Create conversation between seller and courier if not exists
+                existing_conv = Conversation.query.filter_by(
+                    order_id=order.id,
+                    conversation_type='seller_courier'
+                ).first()
+                
+                if not existing_conv:
+                    conversation = Conversation(
+                        user1_id=user.id,
+                        user2_id=courier_id,
+                        order_id=order.id,
+                        conversation_type='seller_courier'
+                    )
+                    db.session.add(conversation)
+                    db.session.flush()
+                    
+                    initial_message = Message(
+                        conversation_id=conversation.id,
+                        sender_id=user.id,
+                        message_text=f"You have been assigned to handle order {order.order_number}. Please coordinate pickup."
+                    )
+                    db.session.add(initial_message)
+                
+                # Send notification to courier
+                send_email(
+                    courier.email,
+                    'New Order Assignment',
+                    f'You have been assigned to pick up order {order.order_number}.'
+                )
+                
+                flash(f'Courier {courier.full_name or courier.email} assigned successfully!', 'success')
+            else:
+                flash('Invalid courier selected.', 'danger')
+        except (ValueError, TypeError):
+            flash('Invalid courier ID.', 'danger')
+    
+    # Assign rider if provided
+    if rider_id and rider_id.strip():
+        try:
+            rider_id = int(rider_id)
+            rider = User.query.filter_by(id=rider_id, role='rider', is_approved=True).first()
+            if rider:
+                # Verify rider belongs to selected courier if courier is assigned
+                if order.courier_id and rider.courier_company_id != order.courier_id:
+                    flash('Selected rider does not belong to the assigned courier company.', 'warning')
+                else:
+                    order.rider_id = rider_id
+                    
+                    # Create conversation between seller and rider if not exists
+                    existing_conv = Conversation.query.filter_by(
+                        order_id=order.id,
+                        conversation_type='seller_rider'
+                    ).first()
+                    
+                    if not existing_conv:
+                        conversation = Conversation(
+                            user1_id=user.id,
+                            user2_id=rider_id,
+                            order_id=order.id,
+                            conversation_type='seller_rider'
+                        )
+                        db.session.add(conversation)
+                        db.session.flush()
+                        
+                        initial_message = Message(
+                            conversation_id=conversation.id,
+                            sender_id=user.id,
+                            message_text=f"You have been assigned to deliver order {order.order_number}."
+                        )
+                        db.session.add(initial_message)
+                    
+                    # Send notification to rider
+                    send_email(
+                        rider.email,
+                        'New Delivery Assignment',
+                        f'You have been assigned to deliver order {order.order_number}.'
+                    )
+                    
+                    flash(f'Rider {rider.full_name or rider.email} assigned successfully!', 'success')
+            else:
+                flash('Invalid rider selected.', 'danger')
+        except (ValueError, TypeError):
+            flash('Invalid rider ID.', 'danger')
+    
+    db.session.commit()
+    log_action('DELIVERY_PERSONNEL_ASSIGNED', 'Order', order.id, f'Courier: {order.courier_id}, Rider: {order.rider_id}')
+    
     return redirect(url_for('seller_order_detail', order_id=order_id))
 
 
