@@ -76,6 +76,24 @@
                     
                     {% if order.status == 'PENDING_PAYMENT' %}
                     <form method="POST" action="{{ url_for('mark_order_ready', order_id=order.id) }}" class="mt-3">
+                        <!-- Courier Selection -->
+                        <div class="mb-3">
+                            <label for="courierSelect" class="form-label small text-muted">
+                                <i class="fas fa-truck"></i> Select Courier (Optional)
+                            </label>
+                            <select name="courier_id" id="courierSelect" class="form-select">
+                                <option value="">-- Let any courier pickup --</option>
+                                {% for courier in available_couriers %}
+                                <option value="{{ courier.id }}">
+                                    {{ courier.full_name or courier.email }} 
+                                    {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">
+                                Selecting a courier will open a chat for coordinating pickup
+                            </small>
+                        </div>
                         <button type="submit" class="btn btn-primary w-100">
                             <i class="fas fa-check"></i> Mark as Ready for Pickup
                         </button>
@@ -83,6 +101,28 @@
                     {% endif %}
                 </div>
             </div>
+
+            <!-- Chat with Courier -->
+            {% if order.courier_id %}
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-comments"></i> Chat with Courier
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-2">
+                        <strong>Courier:</strong> {{ order.courier.full_name or order.courier.email }}
+                    </p>
+                    <a href="{{ url_for('start_courier_conversation', order_id=order.id) }}" class="btn btn-primary w-100">
+                        <i class="fas fa-comment-dots"></i> Open Chat
+                    </a>
+                    <small class="text-muted d-block mt-2">
+                        Coordinate pickup time, location, and parcel handover
+                    </small>
+                </div>
+            </div>
+            {% endif %}
 
             <!-- QR Code for Pickup -->
             {% if order.status == 'READY_FOR_PICKUP' and qr_data %}

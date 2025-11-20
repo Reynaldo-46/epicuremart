@@ -6,68 +6,59 @@
     <div class="col-md-3">
       <div class="card shadow-sm mb-4">
         <div class="card-header bg-primary text-white">
-          <h5 class="mb-0"><i class="fas fa-users"></i> Support Agents</h5>
+          <h5 class="mb-0"><i class="fas fa-headset"></i> Support System</h5>
         </div>
         <div class="card-body">
+          <div class="mb-3">
+            <strong>Total Conversations:</strong>
+            <span class="badge bg-primary float-end">{{ conversations|length }}</span>
+          </div>
+          <div class="mb-3">
+            <strong>Support Agents:</strong>
+            <span class="badge bg-info float-end">{{ support_agents|length }}</span>
+          </div>
           {% if support_agents %}
+          <hr>
+          <div class="mb-2"><strong>Assigned Agents:</strong></div>
           <div class="list-group list-group-flush">
             {% for agent in support_agents %}
-            <div class="list-group-item px-0">
-              <div class="d-flex justify-content-between align-items-center">
-                <div>
-                  <strong>{{ agent.full_name or agent.email }}</strong>
-                  {% if agent.last_activity and (now - agent.last_activity).total_seconds() < 300 %}
-                  <span class="badge badge-success badge-sm ml-2">
-                    <i class="fas fa-circle"></i> Online
-                  </span>
-                  {% else %}
-                  <span class="badge badge-secondary badge-sm ml-2">
-                    <i class="fas fa-circle"></i> Offline
-                  </span>
-                  {% endif %}
-                </div>
+            <div class="list-group-item px-0 py-2">
+              <div>
+                {{ agent.full_name or agent.email }}
+                {% if agent.last_activity and (now - agent.last_activity).total_seconds() < 300 %}
+                <span class="badge bg-success badge-sm ms-1">
+                  <i class="fas fa-circle"></i> Online
+                </span>
+                {% else %}
+                <span class="badge bg-secondary badge-sm ms-1">
+                  Offline
+                </span>
+                {% endif %}
               </div>
               {% if agent.last_activity %}
-              <small class="text-muted">Last active: {{ agent.last_activity.strftime('%I:%M %p') }}</small>
+              <small class="text-muted">Last active: {{ agent.last_activity.strftime('%b %d, %I:%M %p') }}</small>
               {% endif %}
             </div>
             {% endfor %}
           </div>
           {% else %}
-          <p class="text-muted">No support agents available</p>
+          <div class="alert alert-info mb-0">
+            <i class="fas fa-info-circle"></i> No support agents assigned. 
+            <a href="{{ url_for('manage_support_agents') }}" class="alert-link">Add agents</a>
+          </div>
           {% endif %}
-        </div>
-      </div>
-
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-info text-white">
-          <h6 class="mb-0"><i class="fas fa-chart-bar"></i> Statistics</h6>
-        </div>
-        <div class="card-body">
-          <div class="mb-2">
-            <strong>Total Conversations:</strong>
-            <span class="badge badge-primary float-right">{{ conversations|length }}</span>
-          </div>
-          <div class="mb-2">
-            <strong>Active Agents:</strong>
-            <span class="badge badge-success float-right">{{ active_agents_count }}</span>
-          </div>
-          <div>
-            <strong>Total Agents:</strong>
-            <span class="badge badge-info float-right">{{ support_agents|length }}</span>
-          </div>
         </div>
       </div>
 
       <div class="card shadow-sm">
         <div class="card-header bg-success text-white">
-          <h6 class="mb-0"><i class="fas fa-tools"></i> Admin Actions</h6>
+          <h6 class="mb-0"><i class="fas fa-tools"></i> Quick Actions</h6>
         </div>
         <div class="card-body">
-          <a href="{{ url_for('manage_support_agents') }}" class="btn btn-sm btn-primary btn-block mb-2">
-            <i class="fas fa-user-cog"></i> Manage Support Agents
+          <a href="{{ url_for('manage_support_agents') }}" class="btn btn-sm btn-primary w-100 mb-2">
+            <i class="fas fa-user-cog"></i> Manage Agents
           </a>
-          <a href="{{ url_for('admin_dashboard') }}" class="btn btn-sm btn-outline-secondary btn-block">
+          <a href="{{ url_for('admin_dashboard') }}" class="btn btn-sm btn-outline-secondary w-100">
             <i class="fas fa-arrow-left"></i> Back to Dashboard
           </a>
         </div>

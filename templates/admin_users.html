@@ -99,6 +99,21 @@
               <td>
                 {% if user.role != 'admin' %}
                 <div class="btn-group" role="group">
+                  <!-- Chat Button -->
+                  <form
+                    method="POST"
+                    action="{{ url_for('admin_start_conversation', user_id=user.id) }}"
+                    style="display: inline"
+                  >
+                    <button
+                      type="submit"
+                      class="btn btn-sm btn-primary"
+                      title="Start conversation"
+                    >
+                      <i class="fas fa-comments"></i>
+                    </button>
+                  </form>
+                  
                   {% if user.is_suspended %}
                   <!-- Unsuspend Button -->
                   <form

@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_mail import Mail, Message
+from flask_mail import Mail, Message as MailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
@@ -31,9 +31,12 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False  # Add this
 app.config['MAIL_USERNAME'] = 'reynaldo.yasona06@gmail.com'
-app.config['MAIL_PASSWORD'] = 'urantilhbyppxpqe'
-app.config['MAIL_DEFAULT_SENDER'] = 'Epicuremart <noreply@epicuremart.com>'
+app.config['MAIL_PASSWORD'] = 'urantilhbyppxpqe'  # Use valid app password
+app.config['MAIL_DEFAULT_SENDER'] = ('Epicuremart', 'reynaldo.yasona06@gmail.com')  # Change this
+app.config['MAIL_MAX_EMAILS'] = None  # Add this
+app.config['MAIL_ASCII_ATTACHMENTS'] = False  # Add this
 
 db = SQLAlchemy(app)
 mail = Mail(app)
@@ -85,6 +88,7 @@ class User(db.Model):
     profile_picture = db.Column(db.String(255))  # Profile picture/business icon
     is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
+    quick_reply_templates = db.Column(db.Text)  # JSON string of quick reply templates
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -272,7 +276,8 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin', 'seller_courier'), nullable=False)
+    is_read_only = db.Column(db.Boolean, default=False)  # Read-only for completed orders
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -289,7 +294,12 @@ class Message(db.Model):
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
     sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     message_text = db.Column(db.Text, nullable=False)
-    is_read = db.Column(db.Boolean, default=False)
+    message_type = db.Column(db.Enum('text', 'image'), default='text')
+    image_url = db.Column(db.String(255))  # For image messages
+    status = db.Column(db.Enum('sent', 'delivered', 'seen'), default='sent')  # Message status
+    delivered_at = db.Column(db.DateTime)  # When message was delivered
+    seen_at = db.Column(db.DateTime)  # When message was seen
+    is_read = db.Column(db.Boolean, default=False)  # Deprecated, use status instead
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
@@ -371,14 +381,21 @@ def log_action(action, entity_type=None, entity_id=None, details=None):
 
 
 def send_email(to, subject, body):
-    """Send email notification"""
+    """Send email notification with better error handling"""
     try:
-        msg = Message(subject, recipients=[to])
-        msg.body = body
+        msg = MailMessage(
+            subject=subject,
+            recipients=[to],
+            body=body,
+            sender=app.config['MAIL_DEFAULT_SENDER']
+        )
         mail.send(msg)
+        print(f"✅ Email sent successfully to {to}")
         return True
     except Exception as e:
-        print(f"Email error: {e}")
+        print(f"❌ Email error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -422,6 +439,198 @@ def generate_order_number():
     timestamp = datetime.now().strftime('%Y%m%d')
     random_part = ''.join([str(random.randint(0, 9)) for _ in range(6)])
     return f"EM{timestamp}{random_part}"
+
+
+def update_user_activity():
+    """Update the last_activity timestamp for the current user"""
+    if 'user_id' in session:
+        try:
+            user = User.query.get(session['user_id'])
+            if user:
+                user.last_activity = datetime.utcnow()
+                db.session.commit()
+        except Exception as e:
+            print(f"Error updating user activity: {e}")
+
+
+def get_user_online_status(user):
+    """Get online status and last active time for a user"""
+    if not user or not user.last_activity:
+        return {'online': False, 'last_active': None, 'last_active_text': 'Never'}
+    
+    now = datetime.utcnow()
+    time_diff = (now - user.last_activity).total_seconds()
+    
+    # Online if active in last 5 minutes
+    if time_diff < 300:
+        return {'online': True, 'last_active': user.last_activity, 'last_active_text': 'Online'}
+    
+    # Format last active text
+    if time_diff < 3600:  # Less than 1 hour
+        minutes = int(time_diff / 60)
+        text = f"Last active {minutes} minute{'s' if minutes != 1 else ''} ago"
+    elif time_diff < 86400:  # Less than 1 day
+        hours = int(time_diff / 3600)
+        text = f"Last active {hours} hour{'s' if hours != 1 else ''} ago"
+    elif time_diff < 172800:  # Less than 2 days
+        text = f"Last active yesterday, {user.last_activity.strftime('%I:%M %p')}"
+    else:
+        text = f"Last active {user.last_activity.strftime('%b %d, %I:%M %p')}"
+    
+    return {'online': False, 'last_active': user.last_activity, 'last_active_text': text}
+
+
+def generate_sales_report_pdf(user_role, user_id, start_date=None, end_date=None):
+    """Generate PDF sales report for admin, seller, courier, or rider"""
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    
+    # Create PDF buffer
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title style
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#2c3e50'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    # Get user
+    user = User.query.get(user_id)
+    
+    # Title
+    elements.append(Paragraph("Sales Report", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # User Information
+    info_data = [
+        ['User Information', ''],
+        ['Name:', user.full_name or user.email],
+        ['Role:', user.role.upper()],
+        ['User ID:', str(user.id)],
+    ]
+    
+    # Date range
+    if start_date and end_date:
+        info_data.append(['Date Range:', f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"])
+    else:
+        info_data.append(['Date Range:', 'All Time'])
+    
+    info_table = Table(info_data, colWidths=[2*inch, 4*inch])
+    info_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 20))
+    
+    # Query based on role
+    from sqlalchemy import func
+    
+    if user_role == 'seller':
+        shop = user.shop
+        if not shop:
+            return None
+        
+        query = Order.query.filter_by(shop_id=shop.id, status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_sales = sum([float(o.subtotal or 0) for o in orders])
+        total_commission = sum([float(o.commission_amount or 0) for o in orders])
+        total_earnings = sum([float(o.seller_amount or 0) for o in orders])
+        order_count = len(orders)
+        
+        # Summary data
+        summary_data = [
+            ['Summary', ''],
+            ['Total Orders:', str(order_count)],
+            ['Total Sales (Before Commission):', f"₱{total_sales:,.2f}"],
+            ['Admin Commission (5%):', f"₱{total_commission:,.2f}"],
+            ['Your Earnings (95%):', f"₱{total_earnings:,.2f}"],
+        ]
+        
+    elif user_role == 'courier':
+        query = Order.query.filter_by(courier_id=user_id, status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_earnings = sum([float(o.courier_earnings or 0) for o in orders])
+        order_count = len(orders)
+        
+        summary_data = [
+            ['Summary', ''],
+            ['Total Deliveries:', str(order_count)],
+            ['Total Earnings:', f"₱{total_earnings:,.2f}"],
+        ]
+        
+    elif user_role == 'rider':
+        query = Order.query.filter_by(rider_id=user_id, status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_earnings = sum([float(o.rider_earnings or 0) for o in orders])
+        order_count = len(orders)
+        
+        summary_data = [
+            ['Summary', ''],
+            ['Total Deliveries:', str(order_count)],
+            ['Total Earnings:', f"₱{total_earnings:,.2f}"],
+        ]
+        
+    elif user_role == 'admin':
+        query = Order.query.filter_by(status='DELIVERED')
+        if start_date and end_date:
+            query = query.filter(Order.created_at.between(start_date, end_date))
+        
+        orders = query.all()
+        total_sales = sum([float(o.subtotal or 0) for o in orders])
+        total_commission = sum([float(o.commission_amount or 0) for o in orders])
+        order_count = len(orders)
+        
+        summary_data = [
+            ['Summary', ''],
+            ['Total Orders:', str(order_count)],
+            ['Total Sales:', f"₱{total_sales:,.2f}"],
+            ['Total Commission Earned:', f"₱{total_commission:,.2f}"],
+        ]
+    
+    summary_table = Table(summary_data, colWidths=[3*inch, 3*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2ecc71')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(summary_table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
 
 @app.context_processor
@@ -1765,6 +1974,51 @@ def seller_sales_report():
     )
 
 
+@app.route('/seller/sales-report/export-pdf')
+@login_required
+@role_required('seller')
+def seller_sales_report_export_pdf():
+    """Export seller sales report as PDF"""
+    from flask import send_file
+    
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        flash('You need to create a shop first.', 'warning')
+        return redirect(url_for('create_shop'))
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('seller', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('seller_sales_report'))
+    
+    # Create filename
+    filename = f"sales_report_{user.shop.name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 @app.route('/seller/shop/create', methods=['GET', 'POST'])
 @login_required
 @role_required('seller')
@@ -1940,7 +2194,10 @@ def seller_order_detail(order_id):
     if order.status == 'READY_FOR_PICKUP' and order.pickup_token:
         qr_data = generate_qr_code(order.pickup_token)
     
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data)
+    # Get available couriers for selection
+    available_couriers = User.query.filter_by(role='courier', is_approved=True).all()
+    
+    return render_template('seller_order_detail.html', order=order, qr_data=qr_data, available_couriers=available_couriers)
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
@@ -1957,6 +2214,43 @@ def mark_order_ready(order_id):
     if order.status != 'PENDING_PAYMENT':
         flash('Order cannot be marked as ready.', 'warning')
         return redirect(url_for('seller_order_detail', order_id=order_id))
+    
+    # Get selected courier if provided
+    courier_id = request.form.get('courier_id')
+    if courier_id and courier_id.strip():
+        try:
+            courier_id = int(courier_id)
+            courier = User.query.filter_by(id=courier_id, role='courier').first()
+            if courier:
+                order.courier_id = courier_id
+                
+                # Create conversation between seller and courier
+                existing_conv = Conversation.query.filter_by(
+                    order_id=order.id,
+                    conversation_type='seller_courier'
+                ).first()
+                
+                if not existing_conv:
+                    conversation = Conversation(
+                        user1_id=user.id,  # Seller
+                        user2_id=courier_id,  # Courier
+                        order_id=order.id,
+                        conversation_type='seller_courier'
+                    )
+                    db.session.add(conversation)
+                    
+                    # Add initial message
+                    initial_message = Message(
+                        conversation_id=conversation.id if conversation.id else None,
+                        sender_id=user.id,
+                        message_text=f"Order {order.order_number} is ready for pickup. Please coordinate pickup time and location."
+                    )
+                    # We'll add the message after conversation is committed
+                    db.session.flush()  # Get conversation ID
+                    initial_message.conversation_id = conversation.id
+                    db.session.add(initial_message)
+        except (ValueError, TypeError):
+            pass
     
     # Generate pickup token for courier
     order.pickup_token = generate_qr_token(order.id, 'pickup')
@@ -2029,6 +2323,45 @@ def courier_dashboard():
         courier_commission=courier_commission,
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
+    )
+
+
+@app.route('/courier/earnings-report/export-pdf')
+@login_required
+@role_required('courier')
+def courier_earnings_export_pdf():
+    """Export courier earnings report as PDF"""
+    from flask import send_file
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('courier', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+    
+    # Create filename
+    filename = f"courier_earnings_report_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
     )
 
 
@@ -2151,6 +2484,45 @@ def rider_dashboard():
         rider_commission=rider_commission,
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
+    )
+
+
+@app.route('/rider/earnings-report/export-pdf')
+@login_required
+@role_required('rider')
+def rider_earnings_export_pdf():
+    """Export rider earnings report as PDF"""
+    from flask import send_file
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('rider', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('rider_dashboard'))
+    
+    # Create filename
+    filename = f"rider_earnings_report_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
     )
 
 
@@ -2429,6 +2801,45 @@ def admin_dashboard():
     )
 
 
+@app.route('/admin/sales-report/export-pdf')
+@login_required
+@role_required('admin')
+def admin_sales_report_export_pdf():
+    """Export admin sales report as PDF"""
+    from flask import send_file
+    
+    # Get date range if provided
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    
+    # Generate PDF
+    pdf_buffer = generate_sales_report_pdf('admin', session['user_id'], start_date, end_date)
+    
+    if not pdf_buffer:
+        flash('Unable to generate PDF report.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    
+    # Create filename
+    filename = f"admin_sales_report_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 @app.route('/admin/approvals')
 @login_required
 @role_required('admin')
@@ -2504,6 +2915,46 @@ def admin_users():
         role_filter=role_filter,
         role_counts=role_counts
     )
+
+
+@app.route('/admin/start-conversation/<int:user_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def admin_start_conversation(user_id):
+    """Admin starts a conversation with any user"""
+    admin = User.query.get(session['user_id'])
+    target_user = User.query.get_or_404(user_id)
+    
+    if target_user.id == admin.id:
+        flash('Cannot start a conversation with yourself.', 'warning')
+        return redirect(url_for('admin_users'))
+    
+    # Check for existing conversation
+    existing_conv = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == admin.id, Conversation.user2_id == target_user.id),
+            db.and_(Conversation.user1_id == target_user.id, Conversation.user2_id == admin.id)
+        ),
+        Conversation.conversation_type == 'user_admin'
+    ).first()
+    
+    if existing_conv:
+        return redirect(url_for('view_conversation', conversation_id=existing_conv.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=admin.id,
+        user2_id=target_user.id,
+        conversation_type='user_admin'
+    )
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('ADMIN_CONVERSATION_STARTED', 'Conversation', conversation.id, 
+               f'Admin started conversation with {target_user.email}')
+    
+    flash(f'Conversation started with {target_user.full_name or target_user.email}', 'success')
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
 
 @app.route('/admin/user/suspend/<int:user_id>', methods=['POST'])
@@ -2839,11 +3290,15 @@ def messages_inbox():
         last_message = Message.query.filter_by(conversation_id=conv.id)\
             .order_by(Message.created_at.desc()).first()
         
+        # Get online status for other user
+        online_status = get_user_online_status(other_user)
+        
         conversation_data.append({
             'conversation': conv,
             'other_user': other_user,
             'unread_count': unread_count,
-            'last_message': last_message
+            'last_message': last_message,
+            'online_status': online_status
         })
     
     return render_template('messages_inbox.html', 
@@ -2855,67 +3310,132 @@ def messages_inbox():
 @app.route('/messages/conversation/<int:conversation_id>')
 @login_required
 def view_conversation(conversation_id):
+    from datetime import datetime, timedelta
+    
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Check authorization (also allow admin to view all conversations)
+    if user.role != 'admin' and user.id not in [conversation.user1_id, conversation.user2_id]:
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('messages_inbox'))
     
-    # Mark messages as read
-    Message.query.filter(
+    # Mark messages as read and update status
+    unread_messages = Message.query.filter(
         Message.conversation_id == conversation_id,
         Message.sender_id != user.id,
         Message.is_read == False
-    ).update({'is_read': True})
+    ).all()
+    
+    for msg in unread_messages:
+        msg.is_read = True
+        if msg.status == 'delivered':
+            msg.status = 'seen'
+            msg.seen_at = datetime.utcnow()
+    
     db.session.commit()
     
     messages = Message.query.filter_by(conversation_id=conversation_id)\
         .order_by(Message.created_at.asc()).all()
     
+    # Get the other user and their online status
+    other_user = conversation.user2 if conversation.user1_id == user.id else conversation.user1
+    online_status = get_user_online_status(other_user)
+    
+    # Check if conversation is read-only
+    is_read_only = conversation.is_read_only or (user.role == 'admin' and user.id not in [conversation.user1_id, conversation.user2_id])
+    
     return render_template('conversation.html',
         conversation=conversation,
-        messages=messages
+        messages=messages,
+        other_user=other_user,
+        online_status=online_status,
+        is_read_only=is_read_only,
+        now=datetime.utcnow(),
+        timedelta=timedelta
     )
 
 
 @app.route('/messages/send/<int:conversation_id>', methods=['POST'])
 @login_required
 def send_message(conversation_id):
+    """Send a message in a conversation - FIXED VERSION"""
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    # Check authorization
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+    # Check authorization - allow admins, support agents, and conversation participants
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
     
+    if not (is_participant or is_admin):
+        return jsonify({'success': False, 'error': 'Access denied'}), 403
+    
+    # Check if conversation is read-only
+    if conversation.is_read_only:
+        return jsonify({'success': False, 'error': 'This conversation is read-only'}), 403
+    
+    # Get message text from form data (not JSON)
     message_text = request.form.get('message_text', '').strip()
-    print("DEBUG received message_text =", message_text)
-    if not message_text:
-        return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
+    message_type = 'text'
+    image_url = None
     
+    # Handle image upload
+    if 'image' in request.files:
+        file = request.files['image']
+        if file and file.filename and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            unique_filename = f"chat_{timestamp}_{filename}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            file.save(file_path)
+            image_url = unique_filename
+            message_type = 'image'
+            # If no text provided with image, use placeholder
+            if not message_text:
+                message_text = '[Image]'
+    
+    # Validate that we have either text or image
+    if not message_text:
+        return jsonify({'success': False, 'error': 'Message cannot be empty'}), 400
+    
+    # Create message
     message = Message(
         conversation_id=conversation_id,
         sender_id=user.id,
-        message_text=message_text
+        message_text=message_text,
+        message_type=message_type,
+        image_url=image_url,
+        status='sent'
     )
     
+    # Update conversation timestamp
     conversation.last_message_at = datetime.utcnow()
     
     db.session.add(message)
     db.session.commit()
     
-    log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
+    # Update last activity for support agents and admins
+    if user.is_support_agent or user.role == 'admin':
+        user.last_activity = datetime.utcnow()
+        db.session.commit()
     
+    # Log admin participation in conversation
+    if is_admin and not is_participant:
+        log_action('ADMIN_SEND_SUPPORT_MESSAGE', 'Message', message.id, 
+                  f'Admin sent message in conversation {conversation_id}')
+    
+    # Return success with message data
     return jsonify({
         'success': True,
         'message': {
             'id': message.id,
-            'sender_name': user.full_name,
+            'sender_name': user.full_name or user.email,
             'message_text': message.message_text,
+            'message_type': message_type,
+            'image_url': image_url,
             'created_at': message.created_at.strftime('%I:%M %p'),
-            'is_own': True
+            'is_own': True,
+            'status': 'sent'
         }
     })
 
@@ -3019,26 +3539,28 @@ def start_conversation_with_courier(order_id):
     user = User.query.get(session['user_id'])
     order = Order.query.get_or_404(order_id)
     
-    # Check authorization - only buyer or seller can message courier
-    if user.role not in ['buyer', 'seller'] and user.id != order.courier_id:
+    # Check authorization - only customer, seller, or courier can access
+    if user.role not in ['customer', 'seller'] and user.id != order.courier_id:
         flash('You are not authorized to view this conversation.', 'danger')
         return redirect(url_for('index'))
     
     # Check if order has a courier assigned
     if not order.courier_id:
         flash('No courier has been assigned to this order yet.', 'warning')
-        return redirect(url_for('order_details', order_id=order_id))
+        if user.role == 'seller':
+            return redirect(url_for('seller_order_detail', order_id=order_id))
+        return redirect(url_for('customer_orders'))
     
     courier = User.query.get(order.courier_id)
     
     # Determine conversation type based on who is initiating
-    if user.role == 'buyer':
+    if user.role == 'customer':
         conv_type = 'buyer_courier'
         user1_id = user.id
         user2_id = courier.id
     elif user.role == 'seller':
         conv_type = 'seller_courier'
-        user1_id = order.seller_id
+        user1_id = user.id
         user2_id = courier.id
     else:  # User is the courier
         # Find existing conversation
@@ -3080,6 +3602,14 @@ def start_conversation_with_courier(order_id):
     return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
 
+# Alias for seller convenience
+@app.route('/messages/start-courier-conversation/<int:order_id>')
+@login_required
+def start_courier_conversation(order_id):
+    """Alias for start_conversation_with_courier for easier access"""
+    return start_conversation_with_courier(order_id)
+
+
 @app.route('/messages/check-new/<int:conversation_id>')
 @login_required
 def check_new_messages(conversation_id):
@@ -3103,6 +3633,8 @@ def check_new_messages(conversation_id):
             'id': msg.id,
             'sender_name': msg.sender.full_name,
             'message_text': msg.message_text,
+            'message_type': msg.message_type,
+            'image_url': msg.image_url,
             'created_at': msg.created_at.strftime('%I:%M %p'),
             'is_own': msg.sender_id == user.id
         })
@@ -3818,6 +4350,9 @@ def create_tables():
         
         db.session.commit()
         app.tables_created = True
+    
+    # Update user activity on every request
+    update_user_activity()
 
 
 @app.route('/api/calabarzon-addresses')
