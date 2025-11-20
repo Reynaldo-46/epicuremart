@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -13,8 +13,15 @@ import base64
 import os
 import secrets
 import pymysql
+import uuid
 pymysql.install_as_MySQLdb()
 from sqlalchemy import Numeric
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
 
 app = Flask(__name__)
@@ -288,32 +295,28 @@ class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False)
     sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    message_text = db.Column(db.Text, nullable=False)
+    message_text = db.Column(db.Text, nullable=True)  # Made nullable to allow image-only messages
+    image = db.Column(db.String(255))  # Image filename for uploaded images
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     sender = db.relationship('User')
 
 
-class WithdrawalRequest(db.Model):
-    __tablename__ = 'withdrawal_requests'
+class RiderFeedback(db.Model):
+    __tablename__ = 'rider_feedback'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    amount = db.Column(Numeric(10, 2), nullable=False)
-    payout_method = db.Column(db.String(50), nullable=False)  # e.g., 'bank_transfer', 'gcash', 'paymaya'
-    account_name = db.Column(db.String(100), nullable=False)
-    account_number = db.Column(db.String(100), nullable=False)
-    notes = db.Column(db.Text)
-    status = db.Column(db.Enum('pending', 'processing', 'completed', 'rejected'), default='pending')
-    rejection_reason = db.Column(db.Text)
-    processed_by = db.Column(db.Integer, db.ForeignKey('users.id'))
-    processed_at = db.Column(db.DateTime)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
+    rider_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False)  # 1-5 stars
+    feedback_text = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', foreign_keys=[user_id], backref='withdrawal_requests')
-    processor = db.relationship('User', foreign_keys=[processed_by])
+    order = db.relationship('Order', backref='rider_feedback')
+    rider = db.relationship('User', foreign_keys=[rider_id])
+    customer = db.relationship('User', foreign_keys=[customer_id])
     
 # ==================== HELPER FUNCTIONS ====================
 
@@ -827,7 +830,7 @@ def view_cart():
     
     # Get all cart items for this user (each entry is a separate transaction)
     cart_items_db = CartItem.query.filter_by(user_id=user_id).order_by(CartItem.created_at.desc()).all()
-    
+     
     cart_items = []
     total = 0
     has_stock_error = False
@@ -1429,10 +1432,44 @@ def customer_order_detail(order_id):
                 'review': existing_review
             })
     
+    # Get rider information and feedback
+    rider_info = None
+    rider_avg_rating = None
+    rider_recent_feedback = []
+    existing_rider_feedback = None
+    
+    if order.rider_id:
+        rider = User.query.get(order.rider_id)
+        if rider:
+            rider_info = rider
+            
+            # Calculate average rating for rider
+            all_feedback = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+            if all_feedback:
+                rider_avg_rating = sum(f.rating for f in all_feedback) / len(all_feedback)
+                # Get last 3 feedback items
+                rider_recent_feedback = RiderFeedback.query.filter_by(rider_id=order.rider_id).order_by(RiderFeedback.created_at.desc()).limit(3).all()
+            
+            # Check if customer already left feedback for this order
+            existing_rider_feedback = RiderFeedback.query.filter_by(
+                order_id=order.id,
+                customer_id=session['user_id']
+            ).first()
+    
+    # Get courier information
+    courier_info = None
+    if order.courier_id:
+        courier_info = User.query.get(order.courier_id)
+    
     return render_template('customer_order_detail.html', 
         order=order, 
         qr_data=qr_data,
-        reviewable_items=reviewable_items
+        reviewable_items=reviewable_items,
+        rider_info=rider_info,
+        rider_avg_rating=rider_avg_rating,
+        rider_recent_feedback=rider_recent_feedback,
+        existing_rider_feedback=existing_rider_feedback,
+        courier_info=courier_info
     )
 
 
@@ -1487,6 +1524,58 @@ def add_product_review(product_id):
     
     log_action('PRODUCT_REVIEWED', 'ProductReview', review.id, f'{rating} stars')
     flash('Thank you for your review!', 'success')
+    return redirect(url_for('customer_order_detail', order_id=order_id))
+
+
+@app.route('/submit-rider-feedback/<int:order_id>', methods=['POST'])
+@login_required
+@role_required('customer')
+def submit_rider_feedback(order_id):
+    order = Order.query.get_or_404(order_id)
+    
+    # Verify order belongs to customer and is delivered
+    if order.customer_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('customer_orders'))
+    
+    if order.status != 'DELIVERED':
+        flash('You can only rate the rider after delivery is complete.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    if not order.rider_id:
+        flash('No rider assigned to this order.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    # Check if feedback already exists
+    existing = RiderFeedback.query.filter_by(
+        order_id=order_id,
+        customer_id=session['user_id']
+    ).first()
+    
+    if existing:
+        flash('You have already provided feedback for this rider.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    rating = request.form.get('rider_rating')
+    feedback_text = request.form.get('rider_feedback_text', '').strip()
+    
+    if not rating:
+        flash('Please provide a rating.', 'danger')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    feedback = RiderFeedback(
+        order_id=order_id,
+        rider_id=order.rider_id,
+        customer_id=session['user_id'],
+        rating=int(rating),
+        feedback_text=feedback_text if feedback_text else None
+    )
+    
+    db.session.add(feedback)
+    db.session.commit()
+    
+    log_action('RIDER_FEEDBACK_SUBMITTED', 'RiderFeedback', feedback.id, f'{rating} stars for rider {order.rider_id}')
+    flash('Thank you for your feedback!', 'success')
     return redirect(url_for('customer_order_detail', order_id=order_id))
 
 
@@ -1765,6 +1854,104 @@ def seller_sales_report():
     )
 
 
+@app.route('/seller/sales-report/export-pdf')
+@login_required
+@role_required('seller')
+def seller_sales_report_export_pdf():
+    """Export seller sales report as PDF"""
+    user = User.query.get(session['user_id'])
+    
+    if not user.shop:
+        flash('You need a shop to export sales report.', 'error')
+        return redirect(url_for('seller_dashboard'))
+    
+    # Get filter parameters
+    status_filter = request.args.get('status', 'all')
+    
+    # Build query
+    query = Order.query.filter_by(shop_id=user.shop.id)
+    
+    if status_filter != 'all':
+        query = query.filter_by(status=status_filter)
+    
+    # Get orders (limit to 100 for PDF)
+    orders = query.order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_orders = query.count()
+    delivered_orders = Order.query.filter_by(shop_id=user.shop.id, status='DELIVERED').count()
+    
+    total_sales = db.session.query(func.sum(Order.subtotal))\
+        .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
+    total_commission = total_sales * Decimal('0.05')
+    total_earnings = total_sales - total_commission
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#dc3545'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Sales Report - {user.shop.name}", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Filter:</b> {status_filter.upper() if status_filter != 'all' else 'ALL ORDERS'}", summary_style))
+    elements.append(Paragraph(f"<b>Total Orders:</b> {total_orders}", summary_style))
+    elements.append(Paragraph(f"<b>Delivered Orders:</b> {delivered_orders}", summary_style))
+    elements.append(Paragraph(f"<b>Total Sales:</b> ₱{total_sales:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform Commission (5%):</b> ₱{total_commission:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Your Earnings (95%):</b> ₱{total_earnings:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Customer', 'Status', 'Subtotal', 'Commission', 'Earnings']]
+    
+    # Table data
+    for order in orders:
+        commission = order.subtotal * Decimal('0.05') if order.status == 'DELIVERED' else Decimal('0')
+        earnings = order.subtotal - commission if order.status == 'DELIVERED' else Decimal('0')
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.customer.email[:20],
+            order.status,
+            f"₱{order.subtotal:,.2f}",
+            f"₱{commission:,.2f}",
+            f"₱{earnings:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.8*inch, 1*inch, 1.8*inch, 1*inch, 1*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dc3545')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=sales_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
+
+
 @app.route('/seller/shop/create', methods=['GET', 'POST'])
 @login_required
 @role_required('seller')
@@ -1940,7 +2127,28 @@ def seller_order_detail(order_id):
     if order.status == 'READY_FOR_PICKUP' and order.pickup_token:
         qr_data = generate_qr_code(order.pickup_token)
     
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data)
+    # Get courier information
+    courier_info = None
+    if order.courier_id:
+        courier_info = User.query.get(order.courier_id)
+    
+    # Get rider information and their rating
+    rider_info = None
+    rider_avg_rating = None
+    if order.rider_id:
+        rider_info = User.query.get(order.rider_id)
+        # Calculate average rating for rider
+        all_feedback = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+        if all_feedback:
+            rider_avg_rating = sum(f.rating for f in all_feedback) / len(all_feedback)
+    
+    return render_template('seller_order_detail.html', 
+        order=order, 
+        qr_data=qr_data,
+        courier_info=courier_info,
+        rider_info=rider_info,
+        rider_avg_rating=rider_avg_rating
+    )
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
@@ -2030,6 +2238,90 @@ def courier_dashboard():
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
     )
+
+
+@app.route('/courier/earnings-report/export-pdf')
+@login_required
+@role_required('courier')
+def courier_earnings_report_export_pdf():
+    """Export courier earnings report as PDF"""
+    user_id = session['user_id']
+    user = User.query.get(user_id)
+    
+    # Get completed deliveries (limit to 100 for PDF)
+    orders = Order.query.filter_by(courier_id=user_id, status='DELIVERED')\
+        .order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_deliveries = Order.query.filter_by(courier_id=user_id, status='DELIVERED').count()
+    total_earnings = db.session.query(func.sum(Order.courier_earnings))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.courier_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    courier_commission = total_delivery_fees * Decimal('0.40')
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#17a2b8'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Courier Earnings Report", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Courier:</b> {user.email}", summary_style))
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Total Deliveries:</b> {total_deliveries}", summary_style))
+    elements.append(Paragraph(f"<b>Total Delivery Fees:</b> ₱{total_delivery_fees:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform Commission (40%):</b> ₱{courier_commission:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Your Earnings (60%):</b> ₱{total_earnings:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Shop', 'Delivery Fee', 'Platform (40%)', 'Your Earnings (60%)']]
+    
+    # Table data
+    for order in orders:
+        platform_cut = order.delivery_fee * Decimal('0.40')
+        courier_earn = order.courier_earnings or Decimal('0')
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.shop.name[:25] if order.shop else 'N/A',
+            f"₱{order.delivery_fee:,.2f}",
+            f"₱{platform_cut:,.2f}",
+            f"₱{courier_earn:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.8*inch, 1*inch, 2*inch, 1.2*inch, 1.2*inch, 1.3*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#17a2b8')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=courier_earnings_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
 
 
 @app.route('/courier/pickup-manifest')
@@ -2152,6 +2444,90 @@ def rider_dashboard():
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
     )
+
+
+@app.route('/rider/earnings-report/export-pdf')
+@login_required
+@role_required('rider')
+def rider_earnings_report_export_pdf():
+    """Export rider earnings report as PDF"""
+    user_id = session['user_id']
+    user = User.query.get(user_id)
+    
+    # Get completed deliveries (limit to 100 for PDF)
+    orders = Order.query.filter_by(rider_id=user_id, status='DELIVERED')\
+        .order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_deliveries = Order.query.filter_by(rider_id=user_id, status='DELIVERED').count()
+    total_earnings = db.session.query(func.sum(Order.rider_earnings))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    total_delivery_fees = db.session.query(func.sum(Order.delivery_fee))\
+        .filter(Order.rider_id == user_id, Order.status == 'DELIVERED').scalar() or Decimal('0')
+    rider_commission = total_delivery_fees * Decimal('0.60')
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#28a745'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Rider Earnings Report", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Rider:</b> {user.email}", summary_style))
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Total Deliveries:</b> {total_deliveries}", summary_style))
+    elements.append(Paragraph(f"<b>Total Delivery Fees:</b> ₱{total_delivery_fees:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform/Courier Share (60%):</b> ₱{rider_commission:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Your Earnings (40%):</b> ₱{total_earnings:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Customer', 'Delivery Fee', 'Platform (60%)', 'Your Earnings (40%)']]
+    
+    # Table data
+    for order in orders:
+        platform_cut = order.delivery_fee * Decimal('0.60')
+        rider_earn = order.rider_earnings or Decimal('0')
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.customer.email[:25] if order.customer else 'N/A',
+            f"₱{order.delivery_fee:,.2f}",
+            f"₱{platform_cut:,.2f}",
+            f"₱{rider_earn:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.8*inch, 1*inch, 2*inch, 1.2*inch, 1.2*inch, 1.3*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#28a745')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=rider_earnings_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
 
 
 @app.route('/rider/delivery-manifest')
@@ -2427,6 +2803,156 @@ def admin_dashboard():
         end_date=end_date_str,
         recent_logs=recent_logs
     )
+
+
+@app.route('/admin/sales-report/export-pdf')
+@login_required
+@role_required('admin')
+def admin_sales_report_export_pdf():
+    """Export admin sales report as PDF"""
+    time_filter = request.args.get('filter', 'all')
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    # Parse date range
+    now = datetime.utcnow()
+    start_date = None
+    end_date = None
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        except ValueError:
+            start_date = None
+            end_date = None
+    
+    # Calculate date range based on filter if no custom range
+    if not start_date and not end_date:
+        if time_filter == 'day':
+            start_date = now - timedelta(days=1)
+        elif time_filter == 'week':
+            start_date = now - timedelta(weeks=1)
+        elif time_filter == 'month':
+            start_date = now - timedelta(days=30)
+        elif time_filter == 'year':
+            start_date = now - timedelta(days=365)
+    
+    # Query orders (limit to 100 for PDF)
+    order_query = Order.query.filter_by(status='DELIVERED')
+    if start_date:
+        order_query = order_query.filter(Order.created_at >= start_date)
+    if end_date:
+        order_query = order_query.filter(Order.created_at <= end_date)
+    
+    orders = order_query.order_by(Order.created_at.desc()).limit(100).all()
+    
+    # Calculate totals
+    total_query = Order.query.filter_by(status='DELIVERED')
+    if start_date:
+        total_query = total_query.filter(Order.created_at >= start_date)
+    if end_date:
+        total_query = total_query.filter(Order.created_at <= end_date)
+    
+    total_orders = total_query.count()
+    total_revenue = db.session.query(func.sum(Order.total_amount)).filter(
+        Order.status == 'DELIVERED')
+    if start_date:
+        total_revenue = total_revenue.filter(Order.created_at >= start_date)
+    if end_date:
+        total_revenue = total_revenue.filter(Order.created_at <= end_date)
+    total_revenue = total_revenue.scalar() or Decimal('0')
+    
+    commission_received = db.session.query(func.sum(Order.commission_amount)).filter(
+        Order.status == 'DELIVERED')
+    if start_date:
+        commission_received = commission_received.filter(Order.created_at >= start_date)
+    if end_date:
+        commission_received = commission_received.filter(Order.created_at <= end_date)
+    commission_received = commission_received.scalar() or Decimal('0')
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#6c757d'), alignment=TA_CENTER)
+    elements.append(Paragraph(f"Admin Sales Report - Epicuremart", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Summary information
+    summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=11)
+    elements.append(Paragraph(f"<b>Report Date:</b> {datetime.now().strftime('%B %d, %Y %I:%M %p')}", summary_style))
+    elements.append(Paragraph(f"<b>Filter:</b> {time_filter.upper()}", summary_style))
+    if start_date:
+        elements.append(Paragraph(f"<b>Date Range:</b> {start_date.strftime('%m/%d/%Y')} - {(end_date or now).strftime('%m/%d/%Y')}", summary_style))
+    elements.append(Paragraph(f"<b>Total Delivered Orders:</b> {total_orders}", summary_style))
+    elements.append(Paragraph(f"<b>Total Revenue:</b> ₱{total_revenue:,.2f}", summary_style))
+    elements.append(Paragraph(f"<b>Platform Commission:</b> ₱{commission_received:,.2f}", summary_style))
+    elements.append(Spacer(1, 20))
+    
+    # Table header
+    data = [['Order ID', 'Date', 'Shop', 'Customer', 'Total', 'Commission']]
+    
+    # Table data
+    for order in orders:
+        data.append([
+            f"#{order.id}",
+            order.created_at.strftime('%m/%d/%Y'),
+            order.shop.name[:20] if order.shop else 'N/A',
+            order.customer.email[:20] if order.customer else 'N/A',
+            f"₱{order.total_amount:,.2f}",
+            f"₱{order.commission_amount:,.2f}"
+        ])
+    
+    # Create table
+    table = Table(data, colWidths=[0.7*inch, 1*inch, 1.5*inch, 1.5*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6c757d')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    elements.append(table)
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=admin_sales_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+    
+    return response
+
+
+@app.route('/withdrawal-request')
+@login_required
+def withdrawal_request():
+    """Withdrawal request page for sellers, couriers, and riders"""
+    user = User.query.get(session['user_id'])
+    
+    # Redirect based on role
+    if user.role == 'seller':
+        flash('Withdrawal feature coming soon!', 'info')
+        return redirect(url_for('seller_dashboard'))
+    elif user.role == 'courier':
+        flash('Withdrawal feature coming soon!', 'info')
+        return redirect(url_for('courier_dashboard'))
+    elif user.role == 'rider':
+        flash('Withdrawal feature coming soon!', 'info')
+        return redirect(url_for('rider_dashboard'))
+    else:
+        flash('Withdrawal not available for your account type.', 'warning')
+        return redirect(url_for('dashboard'))
 
 
 @app.route('/admin/approvals')
@@ -2876,48 +3402,132 @@ def view_conversation(conversation_id):
     
     return render_template('conversation.html',
         conversation=conversation,
-        messages=messages
+        messages=messages,
+        now=datetime.utcnow(),  # ← Make sure this is calling the function with ()
+        timedelta=timedelta      # ← Add this for date calculations in template
     )
 
 
 @app.route('/messages/send/<int:conversation_id>', methods=['POST'])
 @login_required
 def send_message(conversation_id):
-    conversation = Conversation.query.get_or_404(conversation_id)
-    user = User.query.get(session['user_id'])
-    
-    # Check authorization
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
-    
-    message_text = request.form.get('message_text', '').strip()
-    print("DEBUG received message_text =", message_text)
-    if not message_text:
-        return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
-    
-    message = Message(
-        conversation_id=conversation_id,
-        sender_id=user.id,
-        message_text=message_text
-    )
-    
-    conversation.last_message_at = datetime.utcnow()
-    
-    db.session.add(message)
-    db.session.commit()
-    
-    log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
-    
-    return jsonify({
-        'success': True,
-        'message': {
-            'id': message.id,
-            'sender_name': user.full_name,
-            'message_text': message.message_text,
-            'created_at': message.created_at.strftime('%I:%M %p'),
-            'is_own': True
+    try:
+        print(f"\n{'='*60}")
+        print(f"send_message called for conversation {conversation_id}")
+        print(f"Request method: {request.method}")
+        print(f"Request content type: {request.content_type}")
+        print(f"Request form keys: {list(request.form.keys())}")
+        print(f"Request files keys: {list(request.files.keys())}")
+        
+        conversation = Conversation.query.get_or_404(conversation_id)
+        user = User.query.get(session['user_id'])
+        print(f"User {user.id} ({user.email}) sending message")
+        
+        # Check authorization - allow admins to send messages in any conversation
+        is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+        is_admin = user.role == 'admin'
+        
+        if not (is_participant or is_admin):
+            print("UNAUTHORIZED: User is not a participant or admin")
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+        
+        message_text = request.form.get('message_text', '').strip()
+        image_file = request.files.get('image')
+        print(f"Message text: '{message_text}' (length: {len(message_text)})")
+        print(f"Image file present: {image_file is not None}")
+        if image_file:
+            print(f"Image filename: {image_file.filename}")
+            print(f"Image content type: {image_file.content_type}")
+        
+        # Require either text or image
+        if not message_text and not image_file:
+            print("VALIDATION ERROR: No text and no image")
+            return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
+        
+        # Handle image upload if present
+        image_filename = None
+        if image_file and image_file.filename:
+            print(f"Processing image upload: {image_file.filename}")
+            # Check file extension
+            allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+            file_ext = image_file.filename.rsplit('.', 1)[1].lower() if '.' in image_file.filename else ''
+            print(f"File extension: {file_ext}")
+            
+            if file_ext not in allowed_extensions:
+                print(f"VALIDATION ERROR: Invalid extension: {file_ext}")
+                return jsonify({'success': False, 'message': f'Invalid image format. Allowed: {", ".join(allowed_extensions)}'}), 400
+            
+            # Check file size (max 5MB)
+            image_file.seek(0, 2)  # Seek to end
+            file_size = image_file.tell()
+            image_file.seek(0)  # Seek back to start
+            print(f"File size: {file_size} bytes ({file_size / 1024 / 1024:.2f} MB)")
+            
+            if file_size > 5 * 1024 * 1024:
+                print("VALIDATION ERROR: File too large")
+                return jsonify({'success': False, 'message': 'Image size must be less than 5MB'}), 400
+            
+            # Generate unique filename
+            image_filename = f"chat_{uuid.uuid4().hex}.{file_ext}"
+            print(f"Generated filename: {image_filename}")
+            
+            # Save image
+            upload_folder = os.path.join(app.root_path, 'static', 'uploads')
+            os.makedirs(upload_folder, exist_ok=True)
+            filepath = os.path.join(upload_folder, image_filename)
+            print(f"Saving to: {filepath}")
+            
+            image_file.save(filepath)
+            
+            # Verify file was saved
+            if os.path.exists(filepath):
+                saved_size = os.path.getsize(filepath)
+                print(f"Image saved successfully! Size: {saved_size} bytes")
+            else:
+                print("ERROR: File was not saved!")
+                return jsonify({'success': False, 'message': 'Failed to save image file'}), 500
+        
+        # Create message
+        print(f"Creating message object...")
+        message = Message(
+            conversation_id=conversation_id,
+            sender_id=user.id,
+            message_text=message_text if message_text else None,
+            image=image_filename
+        )
+        
+        conversation.last_message_at = datetime.utcnow()
+        user.last_activity = datetime.utcnow()
+        
+        print(f"Saving to database...")
+        db.session.add(message)
+        db.session.commit()
+        print(f"Message {message.id} saved successfully to database")
+        
+        log_action('MESSAGE_SENT', 'Message', message.id, f'To conversation {conversation_id}')
+        
+        response_data = {
+            'success': True,
+            'message': {
+                'id': message.id,
+                'sender_name': user.full_name or user.email,
+                'message_text': message.message_text,
+                'image': image_filename,
+                'created_at': message.created_at.strftime('%I:%M %p'),
+                'is_own': True
+            }
         }
-    })
+        print(f"Returning success response")
+        print(f"Response data: {response_data}")
+        print(f"{'='*60}\n")
+        return jsonify(response_data)
+    except Exception as e:
+        print(f"\n{'!'*60}")
+        print(f"EXCEPTION CAUGHT: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        print(f"{'!'*60}\n")
+        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
 
 @app.route('/messages/start/<int:shop_id>', methods=['POST'])
@@ -3087,24 +3697,31 @@ def check_new_messages(conversation_id):
     conversation = Conversation.query.get_or_404(conversation_id)
     user = User.query.get(session['user_id'])
     
-    if user.id not in [conversation.user1_id, conversation.user2_id]:
+    # Check authorization - allow admins too
+    is_participant = user.id in [conversation.user1_id, conversation.user2_id]
+    is_admin = user.role == 'admin'
+    
+    if not (is_participant or is_admin):
         return jsonify({'success': False}), 403
     
     last_message_id = request.args.get('last_id', 0, type=int)
     
+    # Only fetch messages NOT sent by current user to avoid echo/duplicate
     new_messages = Message.query.filter(
         Message.conversation_id == conversation_id,
-        Message.id > last_message_id
+        Message.id > last_message_id,
+        Message.sender_id != user.id  # Exclude messages sent by current user
     ).order_by(Message.created_at.asc()).all()
     
     messages_data = []
     for msg in new_messages:
         messages_data.append({
             'id': msg.id,
-            'sender_name': msg.sender.full_name,
+            'sender_name': msg.sender.full_name or msg.sender.email,
             'message_text': msg.message_text,
+            'image': msg.image,
             'created_at': msg.created_at.strftime('%I:%M %p'),
-            'is_own': msg.sender_id == user.id
+            'is_own': False  # Always False since we exclude own messages
         })
     
     return jsonify({
@@ -3534,253 +4151,6 @@ def api_verify_qr():
         'status': order.status,
         'type': payload['type']
     })
-
-
-# ==================== WITHDRAWAL REQUEST ROUTES ====================
-
-@app.route('/withdrawal/request', methods=['GET', 'POST'])
-@login_required
-def withdrawal_request():
-    """Handle withdrawal request form for sellers, couriers, riders, and admins"""
-    from sqlalchemy import func
-    
-    user = User.query.get(session['user_id'])
-    
-    # Check if user is eligible for withdrawals
-    if user.role not in ['seller', 'courier', 'rider', 'admin']:
-        flash('You are not authorized to make withdrawal requests.', 'danger')
-        return redirect(url_for('index'))
-    
-    # Calculate available balance based on user role
-    available_balance = 0
-    if user.role == 'seller':
-        if not user.shop:
-            flash('You need to create a shop before requesting withdrawals.', 'warning')
-            return redirect(url_for('create_shop'))
-        # Sum of seller_amount from delivered orders minus pending/completed withdrawals
-        total_earnings = db.session.query(func.sum(Order.seller_amount))\
-            .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-        
-    elif user.role == 'courier':
-        # Sum of courier_earnings from delivered orders minus withdrawals
-        total_earnings = db.session.query(func.sum(Order.courier_earnings))\
-            .filter(Order.courier_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-        
-    elif user.role == 'rider':
-        # Sum of rider_earnings from delivered orders minus withdrawals
-        total_earnings = db.session.query(func.sum(Order.rider_earnings))\
-            .filter(Order.rider_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-        
-    elif user.role == 'admin':
-        # Admins can see total commission earnings
-        total_earnings = db.session.query(func.sum(Order.commission_amount))\
-            .filter(Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    
-    if request.method == 'POST':
-        amount = request.form.get('amount', type=float)
-        payout_method = request.form.get('payout_method')
-        account_name = request.form.get('account_name')
-        account_number = request.form.get('account_number')
-        notes = request.form.get('notes', '')
-        
-        # Validation
-        errors = []
-        if not amount or amount <= 0:
-            errors.append('Please enter a valid amount.')
-        elif amount < 100:
-            errors.append('Minimum withdrawal amount is ₱100.00')
-        elif amount > available_balance:
-            errors.append(f'Insufficient balance. Available: ₱{available_balance:.2f}')
-        
-        if not payout_method:
-            errors.append('Please select a payout method.')
-        if not account_name or len(account_name.strip()) < 3:
-            errors.append('Please enter a valid account name.')
-        if not account_number or len(account_number.strip()) < 5:
-            errors.append('Please enter a valid account number.')
-        
-        if errors:
-            for error in errors:
-                flash(error, 'danger')
-        else:
-            # Create withdrawal request
-            # Admin withdrawals are automatically completed, others are pending
-            withdrawal_status = 'completed' if user.role == 'admin' else 'pending'
-            
-            withdrawal = WithdrawalRequest(
-                user_id=user.id,
-                amount=amount,
-                payout_method=payout_method,
-                account_name=account_name.strip(),
-                account_number=account_number.strip(),
-                notes=notes.strip() if notes else None,
-                status=withdrawal_status
-            )
-            
-            # If admin, set processed_by and processed_at automatically
-            if user.role == 'admin':
-                withdrawal.processed_by = user.id
-                withdrawal.processed_at = datetime.utcnow()
-            
-            db.session.add(withdrawal)
-            db.session.commit()
-            
-            # Different messages for admin vs other roles
-            if user.role == 'admin':
-                flash(f'Withdrawal request for ₱{amount:.2f} completed successfully! Your commission has been processed.', 'success')
-            else:
-                flash(f'Withdrawal request for ₱{amount:.2f} submitted successfully! It will be processed within 1-3 business days.', 'success')
-            
-            return redirect(url_for('withdrawal_history'))
-    
-    return render_template('withdrawal_request.html', 
-                         user=user, 
-                         available_balance=available_balance)
-
-
-@app.route('/withdrawal/history')
-@login_required
-def withdrawal_history():
-    """Display withdrawal history for the current user"""
-    from sqlalchemy import func
-    
-    user = User.query.get(session['user_id'])
-    
-    # Check if user is eligible for withdrawals
-    if user.role not in ['seller', 'courier', 'rider', 'admin']:
-        flash('You are not authorized to view withdrawal history.', 'danger')
-        return redirect(url_for('index'))
-    
-    # Get withdrawal requests
-    withdrawals = WithdrawalRequest.query.filter_by(user_id=user.id)\
-        .order_by(WithdrawalRequest.created_at.desc()).all()
-    
-    # Calculate statistics
-    total_withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-        .filter(WithdrawalRequest.user_id == user.id, 
-               WithdrawalRequest.status == 'completed').scalar() or 0
-    
-    pending_amount = db.session.query(func.sum(WithdrawalRequest.amount))\
-        .filter(WithdrawalRequest.user_id == user.id, 
-               WithdrawalRequest.status.in_(['pending', 'processing'])).scalar() or 0
-    
-    # Calculate available balance
-    available_balance = 0
-    if user.role == 'seller' and user.shop:
-        total_earnings = db.session.query(func.sum(Order.seller_amount))\
-            .filter(Order.shop_id == user.shop.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    elif user.role == 'courier':
-        total_earnings = db.session.query(func.sum(Order.courier_earnings))\
-            .filter(Order.courier_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    elif user.role == 'rider':
-        total_earnings = db.session.query(func.sum(Order.rider_earnings))\
-            .filter(Order.rider_id == user.id, Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    elif user.role == 'admin':
-        total_earnings = db.session.query(func.sum(Order.commission_amount))\
-            .filter(Order.status == 'DELIVERED').scalar() or 0
-        withdrawn = db.session.query(func.sum(WithdrawalRequest.amount))\
-            .filter(WithdrawalRequest.user_id == user.id, 
-                   WithdrawalRequest.status.in_(['pending', 'processing', 'completed'])).scalar() or 0
-        available_balance = float(total_earnings) - float(withdrawn)
-    
-    return render_template('withdrawal_history.html',
-                         user=user,
-                         withdrawals=withdrawals,
-                         total_withdrawn=float(total_withdrawn),
-                         pending_amount=float(pending_amount),
-                         available_balance=available_balance)
-
-
-@app.route('/admin/withdrawals')
-@login_required
-@role_required('admin')
-def admin_withdrawals():
-    """Admin view of all withdrawal requests"""
-    from sqlalchemy import func
-    
-    status_filter = request.args.get('status', 'all')
-    
-    # Build query
-    query = WithdrawalRequest.query
-    if status_filter != 'all':
-        query = query.filter_by(status=status_filter)
-    
-    withdrawals = query.order_by(WithdrawalRequest.created_at.desc()).all()
-    
-    # Statistics
-    total_pending = WithdrawalRequest.query.filter_by(status='pending').count()
-    total_processing = WithdrawalRequest.query.filter_by(status='processing').count()
-    total_completed = WithdrawalRequest.query.filter_by(status='completed').count()
-    
-    pending_amount = db.session.query(func.sum(WithdrawalRequest.amount))\
-        .filter(WithdrawalRequest.status == 'pending').scalar() or 0
-    
-    return render_template('admin_withdrawals.html',
-                         withdrawals=withdrawals,
-                         status_filter=status_filter,
-                         total_pending=total_pending,
-                         total_processing=total_processing,
-                         total_completed=total_completed,
-                         pending_amount=float(pending_amount))
-
-
-@app.route('/admin/withdrawals/<int:withdrawal_id>/update', methods=['POST'])
-@login_required
-@role_required('admin')
-def admin_update_withdrawal(withdrawal_id):
-    """Admin updates withdrawal status"""
-    withdrawal = WithdrawalRequest.query.get_or_404(withdrawal_id)
-    
-    new_status = request.form.get('status')
-    rejection_reason = request.form.get('rejection_reason', '')
-    
-    if new_status not in ['pending', 'processing', 'completed', 'rejected']:
-        flash('Invalid status.', 'danger')
-        return redirect(url_for('admin_withdrawals'))
-    
-    old_status = withdrawal.status
-    withdrawal.status = new_status
-    withdrawal.processed_by = session['user_id']
-    withdrawal.processed_at = datetime.utcnow()
-    
-    if new_status == 'rejected' and rejection_reason:
-        withdrawal.rejection_reason = rejection_reason
-    
-    db.session.commit()
-    
-    log_action('WITHDRAWAL_STATUS_UPDATED', 'WithdrawalRequest', withdrawal_id,
-              f'Status: {old_status} → {new_status}')
-    
-    flash(f'Withdrawal request #{withdrawal_id} updated to {new_status}.', 'success')
-    return redirect(url_for('admin_withdrawals'))
 
 
 # ==================== INITIALIZE DATABASE ====================
