@@ -247,6 +247,21 @@ class ProductReview(db.Model):
     order = db.relationship('Order')
 
 
+class RiderFeedback(db.Model):
+    __tablename__ = 'rider_feedback'
+    id = db.Column(db.Integer, primary_key=True)
+    rider_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False)  # 1-5 stars
+    feedback_text = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    rider = db.relationship('User', foreign_keys=[rider_id], backref='received_feedback')
+    customer = db.relationship('User', foreign_keys=[customer_id])
+    order = db.relationship('Order', backref='rider_feedback')
+
+
 class DeliveryFee(db.Model):
     __tablename__ = 'delivery_fees'
     id = db.Column(db.Integer, primary_key=True)
@@ -276,7 +291,7 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin', 'seller_courier'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin', 'seller_courier', 'buyer_courier', 'courier_rider'), nullable=False)
     is_read_only = db.Column(db.Boolean, default=False)  # Read-only for completed orders
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -1638,10 +1653,53 @@ def customer_order_detail(order_id):
                 'review': existing_review
             })
     
+    # Get rider information if rider is assigned
+    rider_info = None
+    rider_rating = None
+    has_rider_feedback = False
+    if order.rider_id:
+        rider = User.query.get(order.rider_id)
+        feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+        avg_rating = sum([f.rating for f in feedbacks]) / len(feedbacks) if feedbacks else 0
+        recent_feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).order_by(RiderFeedback.created_at.desc()).limit(3).all()
+        
+        rider_info = {
+            'id': rider.id,
+            'full_name': rider.full_name or rider.email,
+            'email': rider.email,
+            'phone': rider.phone,
+            'profile_picture': rider.profile_picture,
+            'avg_rating': round(avg_rating, 1),
+            'total_feedbacks': len(feedbacks),
+            'recent_feedbacks': recent_feedbacks
+        }
+        
+        # Check if customer already gave feedback for this order
+        has_rider_feedback = RiderFeedback.query.filter_by(
+            order_id=order_id,
+            customer_id=session['user_id']
+        ).first() is not None
+    
+    # Get courier information if courier is assigned
+    courier_info = None
+    if order.courier_id:
+        courier = User.query.get(order.courier_id)
+        courier_info = {
+            'id': courier.id,
+            'full_name': courier.full_name or courier.email,
+            'email': courier.email,
+            'phone': courier.phone,
+            'profile_picture': courier.profile_picture,
+            'vehicle_type': courier.vehicle_type
+        }
+    
     return render_template('customer_order_detail.html', 
         order=order, 
         qr_data=qr_data,
-        reviewable_items=reviewable_items
+        reviewable_items=reviewable_items,
+        rider_info=rider_info,
+        courier_info=courier_info,
+        has_rider_feedback=has_rider_feedback
     )
 
 
@@ -1718,6 +1776,87 @@ def product_detail(product_id):
         total_reviews=len(reviews)
     )
 
+
+@app.route('/order/<int:order_id>/rider-feedback', methods=['POST'])
+@login_required
+@role_required('customer')
+def add_rider_feedback(order_id):
+    """Add feedback for a rider after delivery"""
+    order = Order.query.get_or_404(order_id)
+    
+    # Verify customer owns this order
+    if order.customer_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('customer_orders'))
+    
+    # Verify order is delivered and has a rider
+    if order.status != 'DELIVERED':
+        flash('You can only rate the rider after delivery.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    if not order.rider_id:
+        flash('No rider assigned to this order.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    # Check if already reviewed
+    existing = RiderFeedback.query.filter_by(
+        order_id=order_id,
+        customer_id=session['user_id']
+    ).first()
+    
+    if existing:
+        flash('You have already rated this rider.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    rating = request.form.get('rating')
+    feedback_text = request.form.get('feedback_text', '')
+    
+    if not rating:
+        flash('Please provide a rating.', 'danger')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    feedback = RiderFeedback(
+        rider_id=order.rider_id,
+        customer_id=session['user_id'],
+        order_id=order_id,
+        rating=int(rating),
+        feedback_text=feedback_text
+    )
+    
+    db.session.add(feedback)
+    db.session.commit()
+    
+    log_action('RIDER_FEEDBACK_ADDED', 'RiderFeedback', feedback.id, f'{rating} stars for rider {order.rider_id}')
+    flash('Thank you for rating the rider!', 'success')
+    return redirect(url_for('customer_order_detail', order_id=order_id))
+
+
+@app.route('/api/rider/<int:rider_id>/rating')
+def get_rider_rating(rider_id):
+    """Get rider's average rating and recent feedback"""
+    rider = User.query.get_or_404(rider_id)
+    
+    if rider.role != 'rider':
+        return jsonify({'error': 'Not a rider'}), 400
+    
+    feedbacks = RiderFeedback.query.filter_by(rider_id=rider_id).order_by(RiderFeedback.created_at.desc()).all()
+    
+    avg_rating = sum([f.rating for f in feedbacks]) / len(feedbacks) if feedbacks else 0
+    total_feedbacks = len(feedbacks)
+    
+    recent_feedbacks = []
+    for f in feedbacks[:5]:  # Get last 5 feedback items
+        recent_feedbacks.append({
+            'rating': f.rating,
+            'feedback_text': f.feedback_text,
+            'created_at': f.created_at.strftime('%B %d, %Y')
+        })
+    
+    return jsonify({
+        'avg_rating': round(avg_rating, 1),
+        'total_feedbacks': total_feedbacks,
+        'recent_feedbacks': recent_feedbacks
+    })
 
 
 # @app.route('/customer/order/<int:order_id>')
@@ -2197,7 +2336,45 @@ def seller_order_detail(order_id):
     # Get available couriers for selection
     available_couriers = User.query.filter_by(role='courier', is_approved=True).all()
     
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data, available_couriers=available_couriers)
+    # Get rider information if rider is assigned
+    rider_info = None
+    if order.rider_id:
+        rider = User.query.get(order.rider_id)
+        feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+        avg_rating = sum([f.rating for f in feedbacks]) / len(feedbacks) if feedbacks else 0
+        recent_feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).order_by(RiderFeedback.created_at.desc()).limit(3).all()
+        
+        rider_info = {
+            'id': rider.id,
+            'full_name': rider.full_name or rider.email,
+            'email': rider.email,
+            'phone': rider.phone,
+            'profile_picture': rider.profile_picture,
+            'avg_rating': round(avg_rating, 1),
+            'total_feedbacks': len(feedbacks),
+            'recent_feedbacks': recent_feedbacks
+        }
+    
+    # Get courier information if courier is assigned
+    courier_info = None
+    if order.courier_id:
+        courier = User.query.get(order.courier_id)
+        courier_info = {
+            'id': courier.id,
+            'full_name': courier.full_name or courier.email,
+            'email': courier.email,
+            'phone': courier.phone,
+            'profile_picture': courier.profile_picture,
+            'vehicle_type': courier.vehicle_type
+        }
+    
+    return render_template('seller_order_detail.html', 
+        order=order, 
+        qr_data=qr_data, 
+        available_couriers=available_couriers,
+        rider_info=rider_info,
+        courier_info=courier_info
+    )
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
@@ -3608,6 +3785,65 @@ def start_conversation_with_courier(order_id):
 def start_courier_conversation(order_id):
     """Alias for start_conversation_with_courier for easier access"""
     return start_conversation_with_courier(order_id)
+
+
+@app.route('/messages/start-courier-rider-chat/<int:order_id>')
+@login_required
+@role_required('courier', 'rider')
+def start_courier_rider_chat(order_id):
+    """Start conversation between courier and rider for an order"""
+    order = Order.query.get_or_404(order_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify user is courier or rider of this order
+    if user.role == 'courier' and order.courier_id != user.id:
+        flash('You are not the courier for this order.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+    
+    if user.role == 'rider' and order.rider_id != user.id:
+        flash('You are not the rider for this order.', 'danger')
+        return redirect(url_for('rider_dashboard'))
+    
+    # Check if both courier and rider are assigned
+    if not order.courier_id or not order.rider_id:
+        flash('Both courier and rider must be assigned to start chat.', 'warning')
+        if user.role == 'courier':
+            return redirect(url_for('courier_dashboard'))
+        return redirect(url_for('rider_dashboard'))
+    
+    # Determine the other user
+    if user.role == 'courier':
+        other_user_id = order.rider_id
+    else:  # rider
+        other_user_id = order.courier_id
+    
+    # Check if conversation already exists
+    existing = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == user.id, Conversation.user2_id == other_user_id),
+            db.and_(Conversation.user1_id == other_user_id, Conversation.user2_id == user.id)
+        ),
+        Conversation.conversation_type == 'courier_rider',
+        Conversation.order_id == order_id
+    ).first()
+    
+    if existing:
+        return redirect(url_for('view_conversation', conversation_id=existing.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=user.id,
+        user2_id=other_user_id,
+        order_id=order_id,
+        conversation_type='courier_rider'
+    )
+    
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'Courier-Rider chat for order {order.order_number}')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
 
 @app.route('/messages/check-new/<int:conversation_id>')

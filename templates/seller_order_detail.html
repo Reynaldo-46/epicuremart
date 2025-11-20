@@ -107,19 +107,101 @@
             <div class="card mb-4">
                 <div class="card-header bg-primary text-white">
                     <h5 class="mb-0">
-                        <i class="fas fa-comments"></i> Chat with Courier
+                        <i class="fas fa-truck me-2"></i> Courier Information
                     </h5>
                 </div>
                 <div class="card-body">
+                    {% if courier_info %}
+                    <div class="d-flex align-items-start mb-3">
+                        {% if courier_info.profile_picture %}
+                        <img src="{{ url_for('static', filename='uploads/' + courier_info.profile_picture) }}" 
+                             alt="Courier Photo" 
+                             class="rounded-circle me-3" 
+                             style="width: 50px; height: 50px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                             style="width: 50px; height: 50px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        {% endif %}
+                        <div class="flex-grow-1">
+                            <h6 class="mb-1">{{ courier_info.full_name }}</h6>
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-envelope me-1"></i>{{ courier_info.email }}
+                            </p>
+                            {% if courier_info.phone %}
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-phone me-1"></i>{{ courier_info.phone }}
+                            </p>
+                            {% endif %}
+                            {% if courier_info.vehicle_type %}
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-car me-1"></i>{{ courier_info.vehicle_type }}
+                            </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% else %}
                     <p class="mb-2">
                         <strong>Courier:</strong> {{ order.courier.full_name or order.courier.email }}
                     </p>
+                    {% endif %}
                     <a href="{{ url_for('start_courier_conversation', order_id=order.id) }}" class="btn btn-primary w-100">
                         <i class="fas fa-comment-dots"></i> Open Chat
                     </a>
                     <small class="text-muted d-block mt-2">
                         Coordinate pickup time, location, and parcel handover
                     </small>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Rider Information (visible when OUT_FOR_DELIVERY or DELIVERED) -->
+            {% if rider_info and order.status in ['OUT_FOR_DELIVERY', 'DELIVERED'] %}
+            <div class="card mb-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-motorcycle me-2"></i>Delivery Rider
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-start mb-2">
+                        {% if rider_info.profile_picture %}
+                        <img src="{{ url_for('static', filename='uploads/' + rider_info.profile_picture) }}" 
+                             alt="Rider Photo" 
+                             class="rounded-circle me-3" 
+                             style="width: 50px; height: 50px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                             style="width: 50px; height: 50px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        {% endif %}
+                        <div class="flex-grow-1">
+                            <h6 class="mb-1">{{ rider_info.full_name }}</h6>
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-envelope me-1"></i>{{ rider_info.email }}
+                            </p>
+                            {% if rider_info.phone %}
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-phone me-1"></i>{{ rider_info.phone }}
+                            </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    {% if rider_info.avg_rating > 0 %}
+                    <div class="mt-2">
+                        <span class="badge bg-warning text-dark">
+                            <i class="fas fa-star"></i> {{ rider_info.avg_rating }} ({{ rider_info.total_feedbacks }} reviews)
+                        </span>
+                    </div>
+                    {% endif %}
+                    
+                    <a href="{{ url_for('start_conversation_with_rider', order_id=order.id) }}" 
+                       class="btn btn-primary btn-sm w-100 mt-3">
+                        <i class="fas fa-comment-dots me-1"></i>Chat with Rider
+                    </a>
                 </div>
             </div>
             {% endif %}
