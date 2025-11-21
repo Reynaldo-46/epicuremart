@@ -85,7 +85,7 @@
                                 <option value="">-- Let any courier pickup --</option>
                                 {% for courier in available_couriers %}
                                 <option value="{{ courier.id }}">
-                                    {{ courier.full_name or courier.email }} 
+                                    {{ courier.company_name or courier.full_name or courier.email }} 
                                     {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}
                                 </option>
                                 {% endfor %}
@@ -102,24 +102,170 @@
                 </div>
             </div>
 
+            <!-- Assign Courier and Rider -->
+            {% if order.status in ['PENDING_PAYMENT', 'READY_FOR_PICKUP', 'IN_TRANSIT_TO_RIDER'] %}
+            <div class="card mb-4">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-user-plus"></i> Assign Delivery Personnel
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('assign_delivery_personnel', order_id=order.id) }}" id="assignmentForm">
+                        <!-- Courier Assignment -->
+                        <div class="mb-3">
+                            <label for="courierAssign" class="form-label fw-bold">
+                                <i class="fas fa-truck"></i> Assign Courier
+                            </label>
+                            <select name="courier_id" id="courierAssign" class="form-select">
+                                <option value="">-- Select Courier --</option>
+                                {% for courier in available_couriers %}
+                                <option value="{{ courier.id }}" {% if order.courier_id == courier.id %}selected{% endif %}>
+                                    {{ courier.company_name or courier.full_name or courier.email }}
+                                    {% if courier.vehicle_type %}({{ courier.vehicle_type }}){% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if order.courier_id %}
+                            <small class="text-success">
+                                <i class="fas fa-check-circle"></i> Currently assigned
+                            </small>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Rider Assignment -->
+                        <div class="mb-3">
+                            <label for="riderAssign" class="form-label fw-bold">
+                                <i class="fas fa-motorcycle"></i> Assign Rider
+                            </label>
+                            <select name="rider_id" id="riderAssign" class="form-select">
+                                <option value="">-- Select Rider --</option>
+                                {% for rider in available_riders %}
+                                <option value="{{ rider.id }}" {% if order.rider_id == rider.id %}selected{% endif %}
+                                        data-courier="{{ rider.courier_company_id or '' }}">
+                                    {{ rider.full_name or rider.email }}
+                                    {% if rider.vehicle_type %}({{ rider.vehicle_type }}){% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if order.rider_id %}
+                            <small class="text-success">
+                                <i class="fas fa-check-circle"></i> Currently assigned
+                            </small>
+                            {% endif %}
+                            <small class="text-muted d-block mt-1">
+                                <i class="fas fa-info-circle"></i> Only riders from selected courier will be shown
+                            </small>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="fas fa-check"></i> Update Assignment
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Chat with Courier -->
             {% if order.courier_id %}
             <div class="card mb-4">
                 <div class="card-header bg-primary text-white">
                     <h5 class="mb-0">
-                        <i class="fas fa-comments"></i> Chat with Courier
+                        <i class="fas fa-truck me-2"></i> Courier Information
                     </h5>
                 </div>
                 <div class="card-body">
+                    {% if courier_info %}
+                    <div class="d-flex align-items-start mb-3">
+                        {% if courier_info.profile_picture %}
+                        <img src="{{ url_for('static', filename='uploads/' + courier_info.profile_picture) }}" 
+                             alt="Courier Photo" 
+                             class="rounded-circle me-3" 
+                             style="width: 50px; height: 50px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                             style="width: 50px; height: 50px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        {% endif %}
+                        <div class="flex-grow-1">
+                            <h6 class="mb-1">{{ courier_info.company_name or courier_info.full_name }}</h6>
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-envelope me-1"></i>{{ courier_info.email }}
+                            </p>
+                            {% if courier_info.phone %}
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-phone me-1"></i>{{ courier_info.phone }}
+                            </p>
+                            {% endif %}
+                            {% if courier_info.vehicle_type %}
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-car me-1"></i>{{ courier_info.vehicle_type }}
+                            </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% else %}
                     <p class="mb-2">
-                        <strong>Courier:</strong> {{ order.courier.full_name or order.courier.email }}
+                        <strong>Courier:</strong> {{ order.courier.company_name or order.courier.full_name or order.courier.email }}
                     </p>
+                    {% endif %}
                     <a href="{{ url_for('start_courier_conversation', order_id=order.id) }}" class="btn btn-primary w-100">
                         <i class="fas fa-comment-dots"></i> Open Chat
                     </a>
                     <small class="text-muted d-block mt-2">
                         Coordinate pickup time, location, and parcel handover
                     </small>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Rider Information (visible when OUT_FOR_DELIVERY or DELIVERED) -->
+            {% if rider_info and order.status in ['OUT_FOR_DELIVERY', 'DELIVERED'] %}
+            <div class="card mb-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-motorcycle me-2"></i>Delivery Rider
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-start mb-2">
+                        {% if rider_info.profile_picture %}
+                        <img src="{{ url_for('static', filename='uploads/' + rider_info.profile_picture) }}" 
+                             alt="Rider Photo" 
+                             class="rounded-circle me-3" 
+                             style="width: 50px; height: 50px; object-fit: cover;">
+                        {% else %}
+                        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-3"
+                             style="width: 50px; height: 50px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        {% endif %}
+                        <div class="flex-grow-1">
+                            <h6 class="mb-1">{{ rider_info.full_name }}</h6>
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-envelope me-1"></i>{{ rider_info.email }}
+                            </p>
+                            {% if rider_info.phone %}
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-phone me-1"></i>{{ rider_info.phone }}
+                            </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    {% if rider_info.avg_rating > 0 %}
+                    <div class="mt-2">
+                        <span class="badge bg-warning text-dark">
+                            <i class="fas fa-star"></i> {{ rider_info.avg_rating }} ({{ rider_info.total_feedbacks }} reviews)
+                        </span>
+                    </div>
+                    {% endif %}
+                    
+                    <a href="{{ url_for('start_conversation_with_rider', order_id=order.id) }}" 
+                       class="btn btn-primary btn-sm w-100 mt-3">
+                        <i class="fas fa-comment-dots me-1"></i>Chat with Rider
+                    </a>
                 </div>
             </div>
             {% endif %}
@@ -184,4 +330,47 @@
     </div>
 </div>
 {% endif %}
+
+<script>
+// Filter riders based on selected courier
+document.addEventListener('DOMContentLoaded', function() {
+    const courierSelect = document.getElementById('courierAssign');
+    const riderSelect = document.getElementById('riderAssign');
+    
+    if (courierSelect && riderSelect) {
+        const allRiderOptions = Array.from(riderSelect.options);
+        
+        courierSelect.addEventListener('change', function() {
+            const selectedCourierId = this.value;
+            
+            // Clear current options except first one
+            riderSelect.innerHTML = '<option value="">-- Select Rider --</option>';
+            
+            // If no courier selected, show all riders
+            if (!selectedCourierId) {
+                allRiderOptions.slice(1).forEach(option => {
+                    riderSelect.appendChild(option.cloneNode(true));
+                });
+                return;
+            }
+            
+            // Fetch riders for selected courier via AJAX
+            fetch(`/api/riders-by-courier/${selectedCourierId}`)
+                .then(response => response.json())
+                .then(data => {
+                    data.riders.forEach(rider => {
+                        const option = document.createElement('option');
+                        option.value = rider.id;
+                        option.textContent = `${rider.full_name}${rider.vehicle_type ? ' (' + rider.vehicle_type + ')' : ''}`;
+                        riderSelect.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching riders:', error);
+                });
+        });
+    }
+});
+</script>
+
 {% endblock %}

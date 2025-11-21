@@ -89,6 +89,11 @@ class User(db.Model):
     is_support_agent = db.Column(db.Boolean, default=False)  # Support agent flag
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
     quick_reply_templates = db.Column(db.Text)  # JSON string of quick reply templates
+    company_name = db.Column(db.String(200))  # Company name for courier companies
+    company_logo = db.Column(db.String(255))  # Company logo for courier companies
+    company_address = db.Column(db.Text)  # Company address for courier companies
+    company_description = db.Column(db.Text)  # Company description for courier companies
+    courier_id = db.Column(db.Integer, db.ForeignKey('users.id'))  # Courier company that rider belongs to (for riders only)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -96,6 +101,7 @@ class User(db.Model):
     addresses = db.relationship('Address', backref='user', cascade='all, delete-orphan')
     orders = db.relationship('Order', backref='customer', foreign_keys='Order.customer_id')
     cart_items = db.relationship('CartItem', backref='user', cascade='all, delete-orphan')
+    riders = db.relationship('User', backref=db.backref('courier_company', remote_side='User.id'), foreign_keys=[courier_id])
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -207,6 +213,9 @@ class Order(db.Model):
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
     delivery_token = db.Column(db.String(500))  # JWT for customer delivery
     
+    # Rider assignment lock
+    rider_locked = db.Column(db.Boolean, default=False)  # Lock rider after handoff to prevent reassignment
+    
     # Proof of Delivery
     proof_of_delivery = db.Column(db.String(255))  # Photo uploaded by rider as proof
     
@@ -247,6 +256,21 @@ class ProductReview(db.Model):
     order = db.relationship('Order')
 
 
+class RiderFeedback(db.Model):
+    __tablename__ = 'rider_feedback'
+    id = db.Column(db.Integer, primary_key=True)
+    rider_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False)  # 1-5 stars
+    feedback_text = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    rider = db.relationship('User', foreign_keys=[rider_id], backref='received_feedback')
+    customer = db.relationship('User', foreign_keys=[customer_id])
+    order = db.relationship('Order', backref='rider_feedback')
+
+
 class DeliveryFee(db.Model):
     __tablename__ = 'delivery_fees'
     id = db.Column(db.Integer, primary_key=True)
@@ -276,7 +300,7 @@ class Conversation(db.Model):
     user2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'))  # Optional, for buyer-seller conversations
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))  # Optional, for order-related conversations
-    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin', 'seller_courier'), nullable=False)
+    conversation_type = db.Column(db.Enum('buyer_seller', 'seller_rider', 'buyer_rider', 'user_support', 'user_admin', 'seller_courier', 'buyer_courier', 'courier_rider'), nullable=False)
     is_read_only = db.Column(db.Boolean, default=False)  # Read-only for completed orders
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -701,6 +725,8 @@ def register():
         # Rider/Courier specific fields
         plate_number = request.form.get('plate_number', '')
         vehicle_type = request.form.get('vehicle_type', '')
+        courier_id = request.form.get('courier_id', '')
+        company_name = request.form.get('company_name', '')
         
         # Validate password match
         if password != confirm_password:
@@ -714,6 +740,16 @@ def register():
         # Phone validation - required for riders and customers
         if role in ['customer', 'rider', 'courier'] and not phone:
             flash('Contact number is required for this role.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Validate company name for couriers
+        if role == 'courier' and not company_name:
+            flash('Company name is required for couriers.', 'danger')
+            return redirect(url_for('register'))
+        
+        # Validate courier selection for riders
+        if role == 'rider' and not courier_id:
+            flash('Please select a courier company.', 'danger')
             return redirect(url_for('register'))
         
         # Sellers, couriers, riders need admin approval
@@ -732,12 +768,15 @@ def register():
             phone=phone,
             plate_number=plate_number,
             vehicle_type=vehicle_type,
-            is_approved=is_approved
+            is_approved=is_approved,
+            company_name=company_name if role == 'courier' else None,
+            courier_id=int(courier_id) if courier_id and role == 'rider' else None
         )
         user.set_password(password)
         
         # Handle ID document upload for all roles (including buyers/customers)
-        if role in ['customer', 'seller', 'courier', 'rider']:
+        # NOTE: Couriers do NOT need ID documents - only business permit
+        if role in ['customer', 'seller', 'rider']:
             if 'id_document' in request.files:
                 file = request.files['id_document']
                 if file and file.filename and allowed_file(file.filename):
@@ -746,11 +785,11 @@ def register():
                     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                     file.save(filepath)
                     user.id_document = filename
-                elif role in ['seller', 'courier', 'rider']:
+                elif role in ['seller', 'rider']:
                     flash('Valid ID document is required for this role.', 'danger')
                     return redirect(url_for('register'))
-            elif role in ['seller', 'courier', 'rider']:
-                flash('ID document upload is required for sellers, couriers, and riders.', 'danger')
+            elif role in ['seller', 'rider']:
+                flash('ID document upload is required for sellers and riders.', 'danger')
                 return redirect(url_for('register'))
         
         # Handle business permit for sellers
@@ -770,8 +809,25 @@ def register():
                 flash('Business permit upload is required for sellers.', 'danger')
                 return redirect(url_for('register'))
         
-        # Handle driver's license and OR/CR for riders and couriers
-        if role in ['rider', 'courier']:
+        # Handle business permit/registration for couriers
+        if role == 'courier':
+            if 'business_permit' in request.files:
+                file = request.files['business_permit']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"business_permit_courier_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.business_permit = filename
+                else:
+                    flash('Valid business permit/registration document is required for couriers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('Business permit/registration document upload is required for couriers.', 'danger')
+                return redirect(url_for('register'))
+        
+        # Handle driver's license and OR/CR for riders ONLY (not for couriers)
+        if role == 'rider':
             # Driver's License
             if 'drivers_license' in request.files:
                 file = request.files['drivers_license']
@@ -782,10 +838,10 @@ def register():
                     file.save(filepath)
                     user.drivers_license = filename
                 else:
-                    flash('Valid driver\'s license is required for riders and couriers.', 'danger')
+                    flash('Valid driver\'s license is required for riders.', 'danger')
                     return redirect(url_for('register'))
             else:
-                flash('Driver\'s license upload is required for riders and couriers.', 'danger')
+                flash('Driver\'s license upload is required for riders.', 'danger')
                 return redirect(url_for('register'))
             
             # OR/CR
@@ -798,15 +854,15 @@ def register():
                     file.save(filepath)
                     user.or_cr = filename
                 else:
-                    flash('Valid OR/CR is required for riders and couriers.', 'danger')
+                    flash('Valid OR/CR is required for riders.', 'danger')
                     return redirect(url_for('register'))
             else:
-                flash('OR/CR upload is required for riders and couriers.', 'danger')
+                flash('OR/CR upload is required for riders.', 'danger')
                 return redirect(url_for('register'))
             
-            # Validate plate number and vehicle type
+            # Validate plate number and vehicle type for riders only
             if not plate_number or not vehicle_type:
-                flash('Plate number and vehicle type are required for riders and couriers.', 'danger')
+                flash('Plate number and vehicle type are required for riders.', 'danger')
                 return redirect(url_for('register'))
         
         db.session.add(user)
@@ -859,7 +915,9 @@ def register():
         flash('Registration successful! Please check your email for your verification code.', 'success')
         return redirect(url_for('verify_email_code', user_id=user.id))
     
-    return render_template('register.html')
+    # Get list of approved couriers for rider registration
+    couriers = User.query.filter_by(role='courier', is_approved=True).all()
+    return render_template('register.html', couriers=couriers)
 
 
 @app.route('/verify-email/<token>')
@@ -1638,10 +1696,54 @@ def customer_order_detail(order_id):
                 'review': existing_review
             })
     
+    # Get rider information if rider is assigned
+    rider_info = None
+    rider_rating = None
+    has_rider_feedback = False
+    if order.rider_id:
+        rider = User.query.get(order.rider_id)
+        feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+        avg_rating = sum([f.rating for f in feedbacks]) / len(feedbacks) if feedbacks else 0
+        recent_feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).order_by(RiderFeedback.created_at.desc()).limit(3).all()
+        
+        rider_info = {
+            'id': rider.id,
+            'full_name': rider.full_name or rider.email,
+            'email': rider.email,
+            'phone': rider.phone,
+            'profile_picture': rider.profile_picture,
+            'avg_rating': round(avg_rating, 1),
+            'total_feedbacks': len(feedbacks),
+            'recent_feedbacks': recent_feedbacks
+        }
+        
+        # Check if customer already gave feedback for this order
+        has_rider_feedback = RiderFeedback.query.filter_by(
+            order_id=order_id,
+            customer_id=session['user_id']
+        ).first() is not None
+    
+    # Get courier information if courier is assigned
+    courier_info = None
+    if order.courier_id:
+        courier = User.query.get(order.courier_id)
+        courier_info = {
+            'id': courier.id,
+            'company_name': courier.company_name,
+            'full_name': courier.full_name or courier.email,
+            'email': courier.email,
+            'phone': courier.phone,
+            'profile_picture': courier.profile_picture,
+            'vehicle_type': courier.vehicle_type
+        }
+    
     return render_template('customer_order_detail.html', 
         order=order, 
         qr_data=qr_data,
-        reviewable_items=reviewable_items
+        reviewable_items=reviewable_items,
+        rider_info=rider_info,
+        courier_info=courier_info,
+        has_rider_feedback=has_rider_feedback
     )
 
 
@@ -1718,6 +1820,124 @@ def product_detail(product_id):
         total_reviews=len(reviews)
     )
 
+
+@app.route('/order/<int:order_id>/rider-feedback', methods=['POST'])
+@login_required
+@role_required('customer')
+def add_rider_feedback(order_id):
+    """Add feedback for a rider after delivery"""
+    order = Order.query.get_or_404(order_id)
+    
+    # Verify customer owns this order
+    if order.customer_id != session['user_id']:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('customer_orders'))
+    
+    # Verify order is delivered and has a rider
+    if order.status != 'DELIVERED':
+        flash('You can only rate the rider after delivery.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    if not order.rider_id:
+        flash('No rider assigned to this order.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    # Check if already reviewed
+    existing = RiderFeedback.query.filter_by(
+        order_id=order_id,
+        customer_id=session['user_id']
+    ).first()
+    
+    if existing:
+        flash('You have already rated this rider.', 'warning')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    rating = request.form.get('rating')
+    feedback_text = request.form.get('feedback_text', '')
+    
+    if not rating:
+        flash('Please provide a rating.', 'danger')
+        return redirect(url_for('customer_order_detail', order_id=order_id))
+    
+    feedback = RiderFeedback(
+        rider_id=order.rider_id,
+        customer_id=session['user_id'],
+        order_id=order_id,
+        rating=int(rating),
+        feedback_text=feedback_text
+    )
+    
+    db.session.add(feedback)
+    db.session.commit()
+    
+    log_action('RIDER_FEEDBACK_ADDED', 'RiderFeedback', feedback.id, f'{rating} stars for rider {order.rider_id}')
+    flash('Thank you for rating the rider!', 'success')
+    return redirect(url_for('customer_order_detail', order_id=order_id))
+
+
+@app.route('/api/rider/<int:rider_id>/rating')
+def get_rider_rating(rider_id):
+    """Get rider's average rating and recent feedback"""
+    rider = User.query.get_or_404(rider_id)
+    
+    if rider.role != 'rider':
+        return jsonify({'error': 'Not a rider'}), 400
+    
+    feedbacks = RiderFeedback.query.filter_by(rider_id=rider_id).order_by(RiderFeedback.created_at.desc()).all()
+    
+    avg_rating = sum([f.rating for f in feedbacks]) / len(feedbacks) if feedbacks else 0
+    total_feedbacks = len(feedbacks)
+    
+    recent_feedbacks = []
+    for f in feedbacks[:5]:  # Get last 5 feedback items
+        recent_feedbacks.append({
+            'rating': f.rating,
+            'feedback_text': f.feedback_text,
+            'created_at': f.created_at.strftime('%B %d, %Y')
+        })
+    
+    return jsonify({
+        'avg_rating': round(avg_rating, 1),
+        'total_feedbacks': total_feedbacks,
+        'recent_feedbacks': recent_feedbacks
+    })
+
+
+@app.route('/api/riders-by-courier/<int:courier_id>')
+def get_riders_by_courier(courier_id):
+    """Get list of riders associated with a specific courier company"""
+    riders = User.query.filter_by(
+        role='rider',
+        is_approved=True,
+        courier_id=courier_id
+    ).all()
+    
+    riders_data = []
+    for rider in riders:
+        riders_data.append({
+            'id': rider.id,
+            'full_name': rider.full_name or rider.email,
+            'email': rider.email,
+            'phone': rider.phone,
+            'vehicle_type': rider.vehicle_type
+        })
+    
+    return jsonify({'riders': riders_data})
+    total_feedbacks = len(feedbacks)
+    
+    recent_feedbacks = []
+    for f in feedbacks[:5]:  # Get last 5 feedback items
+        recent_feedbacks.append({
+            'rating': f.rating,
+            'feedback_text': f.feedback_text,
+            'created_at': f.created_at.strftime('%B %d, %Y')
+        })
+    
+    return jsonify({
+        'avg_rating': round(avg_rating, 1),
+        'total_feedbacks': total_feedbacks,
+        'recent_feedbacks': recent_feedbacks
+    })
 
 
 # @app.route('/customer/order/<int:order_id>')
@@ -2197,7 +2417,57 @@ def seller_order_detail(order_id):
     # Get available couriers for selection
     available_couriers = User.query.filter_by(role='courier', is_approved=True).all()
     
-    return render_template('seller_order_detail.html', order=order, qr_data=qr_data, available_couriers=available_couriers)
+    # Get available riders (if courier is already assigned, filter by that courier)
+    if order.courier_id:
+        available_riders = User.query.filter_by(
+            role='rider', 
+            is_approved=True,
+            courier_id=order.courier_id
+        ).all()
+    else:
+        available_riders = User.query.filter_by(role='rider', is_approved=True).all()
+    
+    # Get rider information if rider is assigned
+    rider_info = None
+    if order.rider_id:
+        rider = User.query.get(order.rider_id)
+        feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).all()
+        avg_rating = sum([f.rating for f in feedbacks]) / len(feedbacks) if feedbacks else 0
+        recent_feedbacks = RiderFeedback.query.filter_by(rider_id=order.rider_id).order_by(RiderFeedback.created_at.desc()).limit(3).all()
+        
+        rider_info = {
+            'id': rider.id,
+            'full_name': rider.full_name or rider.email,
+            'email': rider.email,
+            'phone': rider.phone,
+            'profile_picture': rider.profile_picture,
+            'avg_rating': round(avg_rating, 1),
+            'total_feedbacks': len(feedbacks),
+            'recent_feedbacks': recent_feedbacks
+        }
+    
+    # Get courier information if courier is assigned
+    courier_info = None
+    if order.courier_id:
+        courier = User.query.get(order.courier_id)
+        courier_info = {
+            'id': courier.id,
+            'company_name': courier.company_name,
+            'full_name': courier.full_name or courier.email,
+            'email': courier.email,
+            'phone': courier.phone,
+            'profile_picture': courier.profile_picture,
+            'vehicle_type': courier.vehicle_type
+        }
+    
+    return render_template('seller_order_detail.html', 
+        order=order, 
+        qr_data=qr_data, 
+        available_couriers=available_couriers,
+        available_riders=available_riders,
+        rider_info=rider_info,
+        courier_info=courier_info
+    )
 
 
 @app.route('/seller/order/<int:order_id>/mark-ready', methods=['POST'])
@@ -2267,6 +2537,123 @@ def mark_order_ready(order_id):
     )
     
     flash('Order marked as ready for pickup!', 'success')
+    return redirect(url_for('seller_order_detail', order_id=order_id))
+
+
+@app.route('/seller/order/<int:order_id>/assign-delivery', methods=['POST'])
+@login_required
+@role_required('seller')
+def assign_delivery_personnel(order_id):
+    """Assign courier and/or rider to an order"""
+    user = User.query.get(session['user_id'])
+    order = Order.query.get_or_404(order_id)
+    
+    if order.shop_id != user.shop.id:
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('seller_orders'))
+    
+    courier_id = request.form.get('courier_id')
+    rider_id = request.form.get('rider_id')
+    
+    # Assign courier if provided
+    if courier_id and courier_id.strip():
+        try:
+            courier_id = int(courier_id)
+            courier = User.query.filter_by(id=courier_id, role='courier', is_approved=True).first()
+            if courier:
+                order.courier_id = courier_id
+                
+                # Create conversation between seller and courier if not exists
+                existing_conv = Conversation.query.filter_by(
+                    order_id=order.id,
+                    conversation_type='seller_courier'
+                ).first()
+                
+                if not existing_conv:
+                    conversation = Conversation(
+                        user1_id=user.id,
+                        user2_id=courier_id,
+                        order_id=order.id,
+                        conversation_type='seller_courier'
+                    )
+                    db.session.add(conversation)
+                    db.session.flush()
+                    
+                    initial_message = Message(
+                        conversation_id=conversation.id,
+                        sender_id=user.id,
+                        message_text=f"You have been assigned to handle order {order.order_number}. Please coordinate pickup."
+                    )
+                    db.session.add(initial_message)
+                
+                # Send notification to courier
+                send_email(
+                    courier.email,
+                    'New Order Assignment',
+                    f'You have been assigned to pick up order {order.order_number}.'
+                )
+                
+                flash(f'Courier {courier.full_name or courier.email} assigned successfully!', 'success')
+            else:
+                flash('Invalid courier selected.', 'danger')
+        except (ValueError, TypeError):
+            flash('Invalid courier ID.', 'danger')
+    
+    # Assign rider if provided
+    if rider_id and rider_id.strip():
+        # Check if rider is already locked
+        if order.rider_locked:
+            flash('Rider has already been locked after courier handoff. Cannot reassign. Contact admin if changes are needed.', 'warning')
+        else:
+            try:
+                rider_id = int(rider_id)
+                rider = User.query.filter_by(id=rider_id, role='rider', is_approved=True).first()
+                if rider:
+                    # Verify rider belongs to selected courier if courier is assigned
+                    if order.courier_id and rider.courier_id != order.courier_id:
+                        flash('Selected rider does not belong to the assigned courier company.', 'warning')
+                    else:
+                        order.rider_id = rider_id
+                        
+                        # Create conversation between seller and rider if not exists
+                        existing_conv = Conversation.query.filter_by(
+                            order_id=order.id,
+                            conversation_type='seller_rider'
+                        ).first()
+                        
+                        if not existing_conv:
+                            conversation = Conversation(
+                                user1_id=user.id,
+                                user2_id=rider_id,
+                                order_id=order.id,
+                                conversation_type='seller_rider'
+                            )
+                            db.session.add(conversation)
+                            db.session.flush()
+                            
+                            initial_message = Message(
+                                conversation_id=conversation.id,
+                                sender_id=user.id,
+                                message_text=f"You have been assigned to deliver order {order.order_number}."
+                            )
+                            db.session.add(initial_message)
+                        
+                        # Send notification to rider
+                        send_email(
+                            rider.email,
+                            'New Delivery Assignment',
+                            f'You have been assigned to deliver order {order.order_number}.'
+                        )
+                        
+                        flash(f'Rider {rider.full_name or rider.email} assigned successfully!', 'success')
+                else:
+                    flash('Invalid rider selected.', 'danger')
+            except (ValueError, TypeError):
+                flash('Invalid rider ID.', 'danger')
+    
+    db.session.commit()
+    log_action('DELIVERY_PERSONNEL_ASSIGNED', 'Order', order.id, f'Courier: {order.courier_id}, Rider: {order.rider_id}')
+    
     return redirect(url_for('seller_order_detail', order_id=order_id))
 
 
@@ -2434,6 +2821,51 @@ def courier_handoff_qr(order_id):
     return render_template('courier_handoff.html', order=order, qr_data=qr_data)
 
 
+@app.route('/courier/profile', methods=['GET', 'POST'])
+@login_required
+@role_required('courier')
+def courier_profile():
+    """Courier profile edit page"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        # Update courier company information
+        user.company_name = request.form.get('company_name', '').strip()
+        user.full_name = request.form.get('full_name', '').strip()
+        user.phone = request.form.get('phone', '').strip()
+        user.email = request.form.get('email', '').strip()
+        user.company_address = request.form.get('company_address', '').strip()
+        user.company_description = request.form.get('company_description', '').strip()
+        user.vehicle_type = request.form.get('vehicle_type', '').strip()
+        
+        # Handle company logo upload
+        if 'company_logo' in request.files:
+            file = request.files['company_logo']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"company_logo_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.company_logo = filename
+        
+        # Handle profile picture upload (optional)
+        if 'profile_picture' in request.files:
+            file = request.files['profile_picture']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"profile_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.profile_picture = filename
+        
+        db.session.commit()
+        log_action('COURIER_PROFILE_UPDATED', 'User', user.id, 'Updated courier profile')
+        flash('Profile updated successfully!', 'success')
+        return redirect(url_for('courier_profile'))
+    
+    return render_template('courier_profile.html', user=user)
+
+
 # ==================== RIDER ROUTES ====================
 
 @app.route('/rider/dashboard')
@@ -2485,6 +2917,52 @@ def rider_dashboard():
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
     )
+
+
+@app.route('/rider/profile', methods=['GET', 'POST'])
+@login_required
+@role_required('rider')
+def rider_profile():
+    """Rider profile edit page"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        # Update rider personal information
+        user.full_name = request.form.get('full_name', '').strip()
+        user.first_name = request.form.get('first_name', '').strip()
+        user.middle_name = request.form.get('middle_name', '').strip()
+        user.last_name = request.form.get('last_name', '').strip()
+        user.phone = request.form.get('phone', '').strip()
+        user.email = request.form.get('email', '').strip()
+        user.vehicle_type = request.form.get('vehicle_type', '').strip()
+        user.plate_number = request.form.get('plate_number', '').strip()
+        
+        # Handle profile picture upload
+        if 'profile_picture' in request.files:
+            file = request.files['profile_picture']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"rider_profile_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.profile_picture = filename
+        
+        # Handle driver's license upload (optional)
+        if 'drivers_license' in request.files:
+            file = request.files['drivers_license']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"drivers_license_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.drivers_license = filename
+        
+        db.session.commit()
+        log_action('RIDER_PROFILE_UPDATED', 'User', user.id, 'Updated rider profile')
+        flash('Profile updated successfully!', 'success')
+        return redirect(url_for('rider_profile'))
+    
+    return render_template('rider_profile.html', user=user)
 
 
 @app.route('/rider/earnings-report/export-pdf')
@@ -2551,12 +3029,18 @@ def rider_scan_from_courier():
             flash('Order not available for pickup.', 'warning')
             return redirect(url_for('rider_scan_from_courier'))
         
-        # Assign rider
+        # Check if rider is already locked to a specific rider
+        if order.rider_locked and order.rider_id and order.rider_id != session['user_id']:
+            flash('This order has already been assigned to another rider and cannot be reassigned.', 'danger')
+            return redirect(url_for('rider_scan_from_courier'))
+        
+        # Assign rider and lock the assignment
         order.rider_id = session['user_id']
+        order.rider_locked = True  # Lock rider assignment - no further changes allowed
         order.status = 'OUT_FOR_DELIVERY'
         db.session.commit()
         
-        log_action('ORDER_OUT_FOR_DELIVERY', 'Order', order.id, f'Rider received {order.order_number}')
+        log_action('ORDER_OUT_FOR_DELIVERY', 'Order', order.id, f'Rider received {order.order_number} - LOCKED')
         
         # Notify customer
         send_email(
@@ -2799,6 +3283,445 @@ def admin_dashboard():
         end_date=end_date_str,
         recent_logs=recent_logs
     )
+
+
+@app.route('/admin/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def admin_change_password():
+    """Admin password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Admin Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('admin_change_password.html', current_user=user, step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('admin_change_password.html', current_user=user, step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('admin_change_password.html', current_user=user, step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('admin_change_password.html', current_user=user, step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('admin_change_password.html', current_user=user, step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"ADMIN PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('admin_dashboard'))
+    
+    return render_template('admin_change_password.html', current_user=user, step='request')
+
+
+@app.route('/seller/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('seller')
+def seller_change_password():
+    """Seller password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('seller_change_password.html', current_user=user, step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('seller_change_password.html', current_user=user, step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('seller_change_password.html', current_user=user, step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('seller_change_password.html', current_user=user, step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('seller_change_password.html', current_user=user, step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('seller_dashboard'))
+    
+    return render_template('seller_change_password.html', current_user=user, step='request')
+
+
+@app.route('/courier/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('courier')
+def courier_change_password():
+    """Courier password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('courier_change_password.html', current_user=user, step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('courier_change_password.html', current_user=user, step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('courier_change_password.html', current_user=user, step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('courier_change_password.html', current_user=user, step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('courier_change_password.html', current_user=user, step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('courier_dashboard'))
+    
+    return render_template('courier_change_password.html', current_user=user, step='request')
+
+
+@app.route('/rider/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('rider')
+def rider_change_password():
+    """Rider password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('rider_change_password.html', current_user=user, step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('rider_change_password.html', current_user=user, step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('rider_change_password.html', current_user=user, step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('rider_change_password.html', current_user=user, step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('rider_change_password.html', current_user=user, step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('rider_dashboard'))
+    
+    return render_template('rider_change_password.html', current_user=user, step='request')
+
+
+@app.route('/customer/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('customer')
+def customer_change_password():
+    """Customer password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('customer_change_password.html', current_user=user, step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('customer_change_password.html', current_user=user, step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('customer_change_password.html', current_user=user, step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('customer_change_password.html', current_user=user, step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('customer_change_password.html', current_user=user, step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('customer_profile'))
+    
+    return render_template('customer_change_password.html', current_user=user, step='request')
+
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """Forgot password - request reset code"""
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        
+        if not email:
+            flash('Please enter your email address.', 'danger')
+            return render_template('forgot_password.html')
+        
+        # Find user by email
+        user = User.query.filter_by(email=email).first()
+        
+        # Always show success message (security - don't reveal if email exists)
+        flash('If an account exists with this email, a password reset code has been sent.', 'success')
+        
+        if user:
+            # Generate and send reset code
+            reset_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = reset_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with reset code
+            send_email(
+                user.email,
+                'Password Reset Request',
+                f'Your password reset code is: {reset_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password reset, please ignore this email and ensure your account is secure.'
+            )
+        
+        # Redirect to reset page
+        return redirect(url_for('reset_password'))
+    
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    """Reset password using verification code"""
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        code = request.form.get('verification_code', '').strip()
+        new_password = request.form.get('new_password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+        
+        # Find user
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            flash('Invalid email address or verification code.', 'danger')
+            return render_template('reset_password.html')
+        
+        # Validate verification code
+        if not user.verification_code or user.verification_code != code:
+            flash('Invalid verification code. Please try again.', 'danger')
+            return render_template('reset_password.html')
+        
+        # Check if code expired
+        if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+            flash('Verification code has expired. Please request a new reset code.', 'danger')
+            return redirect(url_for('forgot_password'))
+        
+        # Validate passwords
+        if not new_password or len(new_password) < 6:
+            flash('Password must be at least 6 characters long.', 'danger')
+            return render_template('reset_password.html')
+        
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return render_template('reset_password.html')
+        
+        # Update password
+        user.set_password(new_password)
+        user.verification_code = None
+        user.verification_code_expires = None
+        db.session.commit()
+        
+        # Log the password reset
+        log_entry = f"PASSWORD RESET - User: {user.email} - IP: {request.remote_addr}"
+        print(log_entry)
+        
+        flash('Your password has been successfully reset! You can now log in with your new password.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('reset_password.html')
 
 
 @app.route('/admin/sales-report/export-pdf')
@@ -3608,6 +4531,65 @@ def start_conversation_with_courier(order_id):
 def start_courier_conversation(order_id):
     """Alias for start_conversation_with_courier for easier access"""
     return start_conversation_with_courier(order_id)
+
+
+@app.route('/messages/start-courier-rider-chat/<int:order_id>')
+@login_required
+@role_required('courier', 'rider')
+def start_courier_rider_chat(order_id):
+    """Start conversation between courier and rider for an order"""
+    order = Order.query.get_or_404(order_id)
+    user = User.query.get(session['user_id'])
+    
+    # Verify user is courier or rider of this order
+    if user.role == 'courier' and order.courier_id != user.id:
+        flash('You are not the courier for this order.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+    
+    if user.role == 'rider' and order.rider_id != user.id:
+        flash('You are not the rider for this order.', 'danger')
+        return redirect(url_for('rider_dashboard'))
+    
+    # Check if both courier and rider are assigned
+    if not order.courier_id or not order.rider_id:
+        flash('Both courier and rider must be assigned to start chat.', 'warning')
+        if user.role == 'courier':
+            return redirect(url_for('courier_dashboard'))
+        return redirect(url_for('rider_dashboard'))
+    
+    # Determine the other user
+    if user.role == 'courier':
+        other_user_id = order.rider_id
+    else:  # rider
+        other_user_id = order.courier_id
+    
+    # Check if conversation already exists
+    existing = Conversation.query.filter(
+        db.or_(
+            db.and_(Conversation.user1_id == user.id, Conversation.user2_id == other_user_id),
+            db.and_(Conversation.user1_id == other_user_id, Conversation.user2_id == user.id)
+        ),
+        Conversation.conversation_type == 'courier_rider',
+        Conversation.order_id == order_id
+    ).first()
+    
+    if existing:
+        return redirect(url_for('view_conversation', conversation_id=existing.id))
+    
+    # Create new conversation
+    conversation = Conversation(
+        user1_id=user.id,
+        user2_id=other_user_id,
+        order_id=order_id,
+        conversation_type='courier_rider'
+    )
+    
+    db.session.add(conversation)
+    db.session.commit()
+    
+    log_action('CONVERSATION_STARTED', 'Conversation', conversation.id, f'Courier-Rider chat for order {order.order_number}')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation.id))
 
 
 @app.route('/messages/check-new/<int:conversation_id>')
