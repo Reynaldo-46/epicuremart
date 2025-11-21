@@ -3355,6 +3355,375 @@ def admin_change_password():
     return render_template('admin_change_password.html', step='request')
 
 
+@app.route('/seller/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('seller')
+def seller_change_password():
+    """Seller password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('seller_change_password.html', step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('seller_change_password.html', step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('seller_change_password.html', step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('seller_change_password.html', step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('seller_change_password.html', step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('seller_dashboard'))
+    
+    return render_template('seller_change_password.html', step='request')
+
+
+@app.route('/courier/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('courier')
+def courier_change_password():
+    """Courier password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('courier_change_password.html', step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('courier_change_password.html', step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('courier_change_password.html', step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('courier_change_password.html', step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('courier_change_password.html', step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('courier_dashboard'))
+    
+    return render_template('courier_change_password.html', step='request')
+
+
+@app.route('/rider/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('rider')
+def rider_change_password():
+    """Rider password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('rider_change_password.html', step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('rider_change_password.html', step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('rider_change_password.html', step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('rider_change_password.html', step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('rider_change_password.html', step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('rider_dashboard'))
+    
+    return render_template('rider_change_password.html', step='request')
+
+
+@app.route('/customer/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('customer')
+def customer_change_password():
+    """Customer password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('customer_change_password.html', step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('customer_change_password.html', step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('customer_change_password.html', step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('customer_change_password.html', step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('customer_change_password.html', step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('customer_profile'))
+    
+    return render_template('customer_change_password.html', step='request')
+
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """Forgot password - request reset code"""
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        
+        if not email:
+            flash('Please enter your email address.', 'danger')
+            return render_template('forgot_password.html')
+        
+        # Find user by email
+        user = User.query.filter_by(email=email).first()
+        
+        # Always show success message (security - don't reveal if email exists)
+        flash('If an account exists with this email, a password reset code has been sent.', 'success')
+        
+        if user:
+            # Generate and send reset code
+            reset_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = reset_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with reset code
+            send_email(
+                user.email,
+                'Password Reset Request',
+                f'Your password reset code is: {reset_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password reset, please ignore this email and ensure your account is secure.'
+            )
+        
+        # Redirect to reset page
+        return redirect(url_for('reset_password'))
+    
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    """Reset password using verification code"""
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        code = request.form.get('verification_code', '').strip()
+        new_password = request.form.get('new_password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+        
+        # Find user
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            flash('Invalid email address or verification code.', 'danger')
+            return render_template('reset_password.html')
+        
+        # Validate verification code
+        if not user.verification_code or user.verification_code != code:
+            flash('Invalid verification code. Please try again.', 'danger')
+            return render_template('reset_password.html')
+        
+        # Check if code expired
+        if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+            flash('Verification code has expired. Please request a new reset code.', 'danger')
+            return redirect(url_for('forgot_password'))
+        
+        # Validate passwords
+        if not new_password or len(new_password) < 6:
+            flash('Password must be at least 6 characters long.', 'danger')
+            return render_template('reset_password.html')
+        
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return render_template('reset_password.html')
+        
+        # Update password
+        user.set_password(new_password)
+        user.verification_code = None
+        user.verification_code_expires = None
+        db.session.commit()
+        
+        # Log the password reset
+        log_entry = f"PASSWORD RESET - User: {user.email} - IP: {request.remote_addr}"
+        print(log_entry)
+        
+        flash('Your password has been successfully reset! You can now log in with your new password.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('reset_password.html')
+
+
 @app.route('/admin/sales-report/export-pdf')
 @login_required
 @role_required('admin')
