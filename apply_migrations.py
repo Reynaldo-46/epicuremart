@@ -172,6 +172,42 @@ def add_courier_profile_fields():
     
     return True
 
+def add_rider_lock_field():
+    """Add rider_locked field to orders table"""
+    try:
+        # Check if column exists in orders table
+        result = db.session.execute(text("""
+            SELECT COUNT(*) as count
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'orders' 
+            AND COLUMN_NAME = 'rider_locked'
+        """))
+        
+        if result.scalar() > 0:
+            print("✓ rider_locked column already exists in orders table")
+            return True
+        
+        print("Adding rider_locked column to orders table...")
+        db.session.execute(text("""
+            ALTER TABLE orders 
+            ADD COLUMN rider_locked BOOLEAN DEFAULT FALSE AFTER delivery_token
+        """))
+        db.session.commit()
+        
+        # Set default value for existing records
+        db.session.execute(text("""
+            UPDATE orders SET rider_locked = FALSE WHERE rider_locked IS NULL
+        """))
+        db.session.commit()
+        
+        print("✓ rider_locked column added successfully")
+        return True
+    except Exception as e:
+        print(f"✗ Error adding rider_locked: {e}")
+        db.session.rollback()
+        return False
+
 def main():
     """Run all migrations"""
     print("=" * 60)
@@ -194,6 +230,7 @@ def main():
             ("Add foreign key constraint", add_foreign_key),
             ("Add index", add_index),
             ("Add courier profile fields", add_courier_profile_fields),
+            ("Add rider lock field", add_rider_lock_field),
         ]
         
         failed = False

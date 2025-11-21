@@ -35,11 +35,11 @@
                             <small class="form-text text-muted" id="idUploadHelp">Upload a valid government-issued ID</small>
                         </div>
                         
-                        <!-- Business Permit Section (shown for Seller only) -->
+                        <!-- Business Permit Section (shown for Seller and Courier) -->
                         <div class="mb-4 d-none" id="businessPermitSection">
-                            <label class="form-label fw-bold">Business Permit *</label>
-                            <input type="file" name="business_permit" class="form-control" id="businessPermitInput" accept="image/*">
-                            <small class="form-text text-muted">Upload your business permit (Required for Sellers)</small>
+                            <label class="form-label fw-bold">Business Permit / Registration Document *</label>
+                            <input type="file" name="business_permit" class="form-control" id="businessPermitInput" accept="image/*,application/pdf">
+                            <small class="form-text text-muted" id="businessPermitHelp">Upload your business permit or registration document (PDF, JPG, PNG)</small>
                         </div>
                         
                         <!-- Driver's License and OR/CR Section (shown for Rider/Courier only) -->
@@ -395,6 +395,8 @@ document.getElementById('roleSelect').addEventListener('change', function() {
         idDocumentInput.required = true;
         idRequiredLabel.textContent = ' *';
         idUploadHelp.textContent = 'Upload a valid government-issued ID (Required)';
+        businessPermitSection.classList.remove('d-none');
+        businessPermitInput.required = true;
         driversLicenseSection.classList.remove('d-none');
         driversLicenseInput.required = true;
         orCrSection.classList.remove('d-none');

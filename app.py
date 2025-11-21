@@ -213,6 +213,9 @@ class Order(db.Model):
     pickup_token = db.Column(db.String(500))  # JWT for courier pickup
     delivery_token = db.Column(db.String(500))  # JWT for customer delivery
     
+    # Rider assignment lock
+    rider_locked = db.Column(db.Boolean, default=False)  # Lock rider after handoff to prevent reassignment
+    
     # Proof of Delivery
     proof_of_delivery = db.Column(db.String(255))  # Photo uploaded by rider as proof
     
@@ -803,6 +806,23 @@ def register():
                     return redirect(url_for('register'))
             else:
                 flash('Business permit upload is required for sellers.', 'danger')
+                return redirect(url_for('register'))
+        
+        # Handle business permit/registration for couriers
+        if role == 'courier':
+            if 'business_permit' in request.files:
+                file = request.files['business_permit']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filename = f"business_permit_courier_{email.split('@')[0]}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    user.business_permit = filename
+                else:
+                    flash('Valid business permit/registration document is required for couriers.', 'danger')
+                    return redirect(url_for('register'))
+            else:
+                flash('Business permit/registration document upload is required for couriers.', 'danger')
                 return redirect(url_for('register'))
         
         # Handle driver's license and OR/CR for riders and couriers
@@ -2580,51 +2600,55 @@ def assign_delivery_personnel(order_id):
     
     # Assign rider if provided
     if rider_id and rider_id.strip():
-        try:
-            rider_id = int(rider_id)
-            rider = User.query.filter_by(id=rider_id, role='rider', is_approved=True).first()
-            if rider:
-                # Verify rider belongs to selected courier if courier is assigned
-                if order.courier_id and rider.courier_id != order.courier_id:
-                    flash('Selected rider does not belong to the assigned courier company.', 'warning')
-                else:
-                    order.rider_id = rider_id
-                    
-                    # Create conversation between seller and rider if not exists
-                    existing_conv = Conversation.query.filter_by(
-                        order_id=order.id,
-                        conversation_type='seller_rider'
-                    ).first()
-                    
-                    if not existing_conv:
-                        conversation = Conversation(
-                            user1_id=user.id,
-                            user2_id=rider_id,
+        # Check if rider is already locked
+        if order.rider_locked:
+            flash('Rider has already been locked after courier handoff. Cannot reassign. Contact admin if changes are needed.', 'warning')
+        else:
+            try:
+                rider_id = int(rider_id)
+                rider = User.query.filter_by(id=rider_id, role='rider', is_approved=True).first()
+                if rider:
+                    # Verify rider belongs to selected courier if courier is assigned
+                    if order.courier_id and rider.courier_id != order.courier_id:
+                        flash('Selected rider does not belong to the assigned courier company.', 'warning')
+                    else:
+                        order.rider_id = rider_id
+                        
+                        # Create conversation between seller and rider if not exists
+                        existing_conv = Conversation.query.filter_by(
                             order_id=order.id,
                             conversation_type='seller_rider'
-                        )
-                        db.session.add(conversation)
-                        db.session.flush()
+                        ).first()
                         
-                        initial_message = Message(
-                            conversation_id=conversation.id,
-                            sender_id=user.id,
-                            message_text=f"You have been assigned to deliver order {order.order_number}."
+                        if not existing_conv:
+                            conversation = Conversation(
+                                user1_id=user.id,
+                                user2_id=rider_id,
+                                order_id=order.id,
+                                conversation_type='seller_rider'
+                            )
+                            db.session.add(conversation)
+                            db.session.flush()
+                            
+                            initial_message = Message(
+                                conversation_id=conversation.id,
+                                sender_id=user.id,
+                                message_text=f"You have been assigned to deliver order {order.order_number}."
+                            )
+                            db.session.add(initial_message)
+                        
+                        # Send notification to rider
+                        send_email(
+                            rider.email,
+                            'New Delivery Assignment',
+                            f'You have been assigned to deliver order {order.order_number}.'
                         )
-                        db.session.add(initial_message)
-                    
-                    # Send notification to rider
-                    send_email(
-                        rider.email,
-                        'New Delivery Assignment',
-                        f'You have been assigned to deliver order {order.order_number}.'
-                    )
-                    
-                    flash(f'Rider {rider.full_name or rider.email} assigned successfully!', 'success')
-            else:
-                flash('Invalid rider selected.', 'danger')
-        except (ValueError, TypeError):
-            flash('Invalid rider ID.', 'danger')
+                        
+                        flash(f'Rider {rider.full_name or rider.email} assigned successfully!', 'success')
+                else:
+                    flash('Invalid rider selected.', 'danger')
+            except (ValueError, TypeError):
+                flash('Invalid rider ID.', 'danger')
     
     db.session.commit()
     log_action('DELIVERY_PERSONNEL_ASSIGNED', 'Order', order.id, f'Courier: {order.courier_id}, Rider: {order.rider_id}')
@@ -3004,12 +3028,18 @@ def rider_scan_from_courier():
             flash('Order not available for pickup.', 'warning')
             return redirect(url_for('rider_scan_from_courier'))
         
-        # Assign rider
+        # Check if rider is already locked to a specific rider
+        if order.rider_locked and order.rider_id and order.rider_id != session['user_id']:
+            flash('This order has already been assigned to another rider and cannot be reassigned.', 'danger')
+            return redirect(url_for('rider_scan_from_courier'))
+        
+        # Assign rider and lock the assignment
         order.rider_id = session['user_id']
+        order.rider_locked = True  # Lock rider assignment - no further changes allowed
         order.status = 'OUT_FOR_DELIVERY'
         db.session.commit()
         
-        log_action('ORDER_OUT_FOR_DELIVERY', 'Order', order.id, f'Rider received {order.order_number}')
+        log_action('ORDER_OUT_FOR_DELIVERY', 'Order', order.id, f'Rider received {order.order_number} - LOCKED')
         
         # Notify customer
         send_email(
