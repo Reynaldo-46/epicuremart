@@ -775,7 +775,8 @@ def register():
         user.set_password(password)
         
         # Handle ID document upload for all roles (including buyers/customers)
-        if role in ['customer', 'seller', 'courier', 'rider']:
+        # NOTE: Couriers do NOT need ID documents - only business permit
+        if role in ['customer', 'seller', 'rider']:
             if 'id_document' in request.files:
                 file = request.files['id_document']
                 if file and file.filename and allowed_file(file.filename):
@@ -784,11 +785,11 @@ def register():
                     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                     file.save(filepath)
                     user.id_document = filename
-                elif role in ['seller', 'courier', 'rider']:
+                elif role in ['seller', 'rider']:
                     flash('Valid ID document is required for this role.', 'danger')
                     return redirect(url_for('register'))
-            elif role in ['seller', 'courier', 'rider']:
-                flash('ID document upload is required for sellers, couriers, and riders.', 'danger')
+            elif role in ['seller', 'rider']:
+                flash('ID document upload is required for sellers and riders.', 'danger')
                 return redirect(url_for('register'))
         
         # Handle business permit for sellers
@@ -825,8 +826,8 @@ def register():
                 flash('Business permit/registration document upload is required for couriers.', 'danger')
                 return redirect(url_for('register'))
         
-        # Handle driver's license and OR/CR for riders and couriers
-        if role in ['rider', 'courier']:
+        # Handle driver's license and OR/CR for riders ONLY (not for couriers)
+        if role == 'rider':
             # Driver's License
             if 'drivers_license' in request.files:
                 file = request.files['drivers_license']
@@ -837,10 +838,10 @@ def register():
                     file.save(filepath)
                     user.drivers_license = filename
                 else:
-                    flash('Valid driver\'s license is required for riders and couriers.', 'danger')
+                    flash('Valid driver\'s license is required for riders.', 'danger')
                     return redirect(url_for('register'))
             else:
-                flash('Driver\'s license upload is required for riders and couriers.', 'danger')
+                flash('Driver\'s license upload is required for riders.', 'danger')
                 return redirect(url_for('register'))
             
             # OR/CR
@@ -853,15 +854,15 @@ def register():
                     file.save(filepath)
                     user.or_cr = filename
                 else:
-                    flash('Valid OR/CR is required for riders and couriers.', 'danger')
+                    flash('Valid OR/CR is required for riders.', 'danger')
                     return redirect(url_for('register'))
             else:
-                flash('OR/CR upload is required for riders and couriers.', 'danger')
+                flash('OR/CR upload is required for riders.', 'danger')
                 return redirect(url_for('register'))
             
-            # Validate plate number and vehicle type
+            # Validate plate number and vehicle type for riders only
             if not plate_number or not vehicle_type:
-                flash('Plate number and vehicle type are required for riders and couriers.', 'danger')
+                flash('Plate number and vehicle type are required for riders.', 'danger')
                 return redirect(url_for('register'))
         
         db.session.add(user)

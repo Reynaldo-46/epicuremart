@@ -391,19 +391,15 @@ document.getElementById('roleSelect').addEventListener('change', function() {
         courierCompanySection.classList.remove('d-none');
         courierCompanySelect.required = true;
     } else if (value === 'courier') {
-        idUploadSection.classList.remove('d-none');
-        idDocumentInput.required = true;
-        idRequiredLabel.textContent = ' *';
-        idUploadHelp.textContent = 'Upload a valid government-issued ID (Required)';
+        // Courier-specific fields only
+        // NO ID document required for couriers
+        // NO Driver's License required for couriers
+        // NO OR/CR required for couriers
+        // NO Plate Number required for couriers
+        // NO Vehicle Type required for couriers
+        
         businessPermitSection.classList.remove('d-none');
         businessPermitInput.required = true;
-        driversLicenseSection.classList.remove('d-none');
-        driversLicenseInput.required = true;
-        orCrSection.classList.remove('d-none');
-        orCrInput.required = true;
-        vehicleDetailsSection.classList.remove('d-none');
-        plateNumberInput.required = true;
-        vehicleTypeInput.required = true;
         companyNameSection.classList.remove('d-none');
         companyNameInput.required = true;
     }
