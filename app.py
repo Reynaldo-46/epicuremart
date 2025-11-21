@@ -3285,6 +3285,76 @@ def admin_dashboard():
     )
 
 
+@app.route('/admin/change-password', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def admin_change_password():
+    """Admin password change with email verification"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'request_code':
+            # Generate and send verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send email with verification code
+            send_email(
+                user.email,
+                'Admin Password Change Verification',
+                f'Your password change verification code is: {verification_code}\n\n'
+                f'This code will expire in 15 minutes.\n\n'
+                f'If you did not request a password change, please ignore this email and ensure your account is secure.'
+            )
+            
+            flash('A verification code has been sent to your email address.', 'success')
+            return render_template('admin_change_password.html', step='verify')
+        
+        elif action == 'verify_and_change':
+            # Verify code and change password
+            code = request.form.get('verification_code', '').strip()
+            new_password = request.form.get('new_password', '').strip()
+            confirm_password = request.form.get('confirm_password', '').strip()
+            
+            # Validate verification code
+            if not user.verification_code or user.verification_code != code:
+                flash('Invalid verification code. Please try again.', 'danger')
+                return render_template('admin_change_password.html', step='verify')
+            
+            # Check if code expired
+            if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
+                flash('Verification code has expired. Please request a new one.', 'danger')
+                return render_template('admin_change_password.html', step='request')
+            
+            # Validate passwords
+            if not new_password or len(new_password) < 6:
+                flash('Password must be at least 6 characters long.', 'danger')
+                return render_template('admin_change_password.html', step='verify')
+            
+            if new_password != confirm_password:
+                flash('Passwords do not match.', 'danger')
+                return render_template('admin_change_password.html', step='verify')
+            
+            # Update password
+            user.set_password(new_password)
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            # Log the password change
+            log_entry = f"ADMIN PASSWORD CHANGE - User: {user.email} - IP: {request.remote_addr}"
+            print(log_entry)
+            
+            flash('Your password has been successfully changed!', 'success')
+            return redirect(url_for('admin_dashboard'))
+    
+    return render_template('admin_change_password.html', step='request')
+
+
 @app.route('/admin/sales-report/export-pdf')
 @login_required
 @role_required('admin')
