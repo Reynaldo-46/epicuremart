@@ -3312,7 +3312,7 @@ def admin_change_password():
             )
             
             flash('A verification code has been sent to your email address.', 'success')
-            return render_template('admin_change_password.html', step='verify')
+            return render_template('admin_change_password.html', current_user=user, step='verify')
         
         elif action == 'verify_and_change':
             # Verify code and change password
@@ -3323,21 +3323,21 @@ def admin_change_password():
             # Validate verification code
             if not user.verification_code or user.verification_code != code:
                 flash('Invalid verification code. Please try again.', 'danger')
-                return render_template('admin_change_password.html', step='verify')
+                return render_template('admin_change_password.html', current_user=user, step='verify')
             
             # Check if code expired
             if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
                 flash('Verification code has expired. Please request a new one.', 'danger')
-                return render_template('admin_change_password.html', step='request')
+                return render_template('admin_change_password.html', current_user=user, step='request')
             
             # Validate passwords
             if not new_password or len(new_password) < 6:
                 flash('Password must be at least 6 characters long.', 'danger')
-                return render_template('admin_change_password.html', step='verify')
+                return render_template('admin_change_password.html', current_user=user, step='verify')
             
             if new_password != confirm_password:
                 flash('Passwords do not match.', 'danger')
-                return render_template('admin_change_password.html', step='verify')
+                return render_template('admin_change_password.html', current_user=user, step='verify')
             
             # Update password
             user.set_password(new_password)
@@ -3352,7 +3352,7 @@ def admin_change_password():
             flash('Your password has been successfully changed!', 'success')
             return redirect(url_for('admin_dashboard'))
     
-    return render_template('admin_change_password.html', step='request')
+    return render_template('admin_change_password.html', current_user=user, step='request')
 
 
 @app.route('/seller/change-password', methods=['GET', 'POST'])
@@ -3382,7 +3382,7 @@ def seller_change_password():
             )
             
             flash('A verification code has been sent to your email address.', 'success')
-            return render_template('seller_change_password.html', step='verify')
+            return render_template('seller_change_password.html', current_user=user, step='verify')
         
         elif action == 'verify_and_change':
             # Verify code and change password
@@ -3393,21 +3393,21 @@ def seller_change_password():
             # Validate verification code
             if not user.verification_code or user.verification_code != code:
                 flash('Invalid verification code. Please try again.', 'danger')
-                return render_template('seller_change_password.html', step='verify')
+                return render_template('seller_change_password.html', current_user=user, step='verify')
             
             # Check if code expired
             if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
                 flash('Verification code has expired. Please request a new one.', 'danger')
-                return render_template('seller_change_password.html', step='request')
+                return render_template('seller_change_password.html', current_user=user, step='request')
             
             # Validate passwords
             if not new_password or len(new_password) < 6:
                 flash('Password must be at least 6 characters long.', 'danger')
-                return render_template('seller_change_password.html', step='verify')
+                return render_template('seller_change_password.html', current_user=user, step='verify')
             
             if new_password != confirm_password:
                 flash('Passwords do not match.', 'danger')
-                return render_template('seller_change_password.html', step='verify')
+                return render_template('seller_change_password.html', current_user=user, step='verify')
             
             # Update password
             user.set_password(new_password)
@@ -3422,7 +3422,7 @@ def seller_change_password():
             flash('Your password has been successfully changed!', 'success')
             return redirect(url_for('seller_dashboard'))
     
-    return render_template('seller_change_password.html', step='request')
+    return render_template('seller_change_password.html', current_user=user, step='request')
 
 
 @app.route('/courier/change-password', methods=['GET', 'POST'])
@@ -3452,7 +3452,7 @@ def courier_change_password():
             )
             
             flash('A verification code has been sent to your email address.', 'success')
-            return render_template('courier_change_password.html', step='verify')
+            return render_template('courier_change_password.html', current_user=user, step='verify')
         
         elif action == 'verify_and_change':
             # Verify code and change password
@@ -3463,21 +3463,21 @@ def courier_change_password():
             # Validate verification code
             if not user.verification_code or user.verification_code != code:
                 flash('Invalid verification code. Please try again.', 'danger')
-                return render_template('courier_change_password.html', step='verify')
+                return render_template('courier_change_password.html', current_user=user, step='verify')
             
             # Check if code expired
             if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
                 flash('Verification code has expired. Please request a new one.', 'danger')
-                return render_template('courier_change_password.html', step='request')
+                return render_template('courier_change_password.html', current_user=user, step='request')
             
             # Validate passwords
             if not new_password or len(new_password) < 6:
                 flash('Password must be at least 6 characters long.', 'danger')
-                return render_template('courier_change_password.html', step='verify')
+                return render_template('courier_change_password.html', current_user=user, step='verify')
             
             if new_password != confirm_password:
                 flash('Passwords do not match.', 'danger')
-                return render_template('courier_change_password.html', step='verify')
+                return render_template('courier_change_password.html', current_user=user, step='verify')
             
             # Update password
             user.set_password(new_password)
@@ -3492,7 +3492,7 @@ def courier_change_password():
             flash('Your password has been successfully changed!', 'success')
             return redirect(url_for('courier_dashboard'))
     
-    return render_template('courier_change_password.html', step='request')
+    return render_template('courier_change_password.html', current_user=user, step='request')
 
 
 @app.route('/rider/change-password', methods=['GET', 'POST'])
@@ -3522,7 +3522,7 @@ def rider_change_password():
             )
             
             flash('A verification code has been sent to your email address.', 'success')
-            return render_template('rider_change_password.html', step='verify')
+            return render_template('rider_change_password.html', current_user=user, step='verify')
         
         elif action == 'verify_and_change':
             # Verify code and change password
@@ -3533,21 +3533,21 @@ def rider_change_password():
             # Validate verification code
             if not user.verification_code or user.verification_code != code:
                 flash('Invalid verification code. Please try again.', 'danger')
-                return render_template('rider_change_password.html', step='verify')
+                return render_template('rider_change_password.html', current_user=user, step='verify')
             
             # Check if code expired
             if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
                 flash('Verification code has expired. Please request a new one.', 'danger')
-                return render_template('rider_change_password.html', step='request')
+                return render_template('rider_change_password.html', current_user=user, step='request')
             
             # Validate passwords
             if not new_password or len(new_password) < 6:
                 flash('Password must be at least 6 characters long.', 'danger')
-                return render_template('rider_change_password.html', step='verify')
+                return render_template('rider_change_password.html', current_user=user, step='verify')
             
             if new_password != confirm_password:
                 flash('Passwords do not match.', 'danger')
-                return render_template('rider_change_password.html', step='verify')
+                return render_template('rider_change_password.html', current_user=user, step='verify')
             
             # Update password
             user.set_password(new_password)
@@ -3562,7 +3562,7 @@ def rider_change_password():
             flash('Your password has been successfully changed!', 'success')
             return redirect(url_for('rider_dashboard'))
     
-    return render_template('rider_change_password.html', step='request')
+    return render_template('rider_change_password.html', current_user=user, step='request')
 
 
 @app.route('/customer/change-password', methods=['GET', 'POST'])
@@ -3592,7 +3592,7 @@ def customer_change_password():
             )
             
             flash('A verification code has been sent to your email address.', 'success')
-            return render_template('customer_change_password.html', step='verify')
+            return render_template('customer_change_password.html', current_user=user, step='verify')
         
         elif action == 'verify_and_change':
             # Verify code and change password
@@ -3603,21 +3603,21 @@ def customer_change_password():
             # Validate verification code
             if not user.verification_code or user.verification_code != code:
                 flash('Invalid verification code. Please try again.', 'danger')
-                return render_template('customer_change_password.html', step='verify')
+                return render_template('customer_change_password.html', current_user=user, step='verify')
             
             # Check if code expired
             if user.verification_code_expires and datetime.utcnow() > user.verification_code_expires:
                 flash('Verification code has expired. Please request a new one.', 'danger')
-                return render_template('customer_change_password.html', step='request')
+                return render_template('customer_change_password.html', current_user=user, step='request')
             
             # Validate passwords
             if not new_password or len(new_password) < 6:
                 flash('Password must be at least 6 characters long.', 'danger')
-                return render_template('customer_change_password.html', step='verify')
+                return render_template('customer_change_password.html', current_user=user, step='verify')
             
             if new_password != confirm_password:
                 flash('Passwords do not match.', 'danger')
-                return render_template('customer_change_password.html', step='verify')
+                return render_template('customer_change_password.html', current_user=user, step='verify')
             
             # Update password
             user.set_password(new_password)
@@ -3632,7 +3632,7 @@ def customer_change_password():
             flash('Your password has been successfully changed!', 'success')
             return redirect(url_for('customer_profile'))
     
-    return render_template('customer_change_password.html', step='request')
+    return render_template('customer_change_password.html', current_user=user, step='request')
 
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
