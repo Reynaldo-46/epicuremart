@@ -90,6 +90,9 @@ class User(db.Model):
     last_activity = db.Column(db.DateTime)  # Last activity timestamp for online status
     quick_reply_templates = db.Column(db.Text)  # JSON string of quick reply templates
     company_name = db.Column(db.String(200))  # Company name for courier companies
+    company_logo = db.Column(db.String(255))  # Company logo for courier companies
+    company_address = db.Column(db.Text)  # Company address for courier companies
+    company_description = db.Column(db.Text)  # Company description for courier companies
     courier_id = db.Column(db.Integer, db.ForeignKey('users.id'))  # Courier company that rider belongs to (for riders only)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -2793,6 +2796,51 @@ def courier_handoff_qr(order_id):
     return render_template('courier_handoff.html', order=order, qr_data=qr_data)
 
 
+@app.route('/courier/profile', methods=['GET', 'POST'])
+@login_required
+@role_required('courier')
+def courier_profile():
+    """Courier profile edit page"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        # Update courier company information
+        user.company_name = request.form.get('company_name', '').strip()
+        user.full_name = request.form.get('full_name', '').strip()
+        user.phone = request.form.get('phone', '').strip()
+        user.email = request.form.get('email', '').strip()
+        user.company_address = request.form.get('company_address', '').strip()
+        user.company_description = request.form.get('company_description', '').strip()
+        user.vehicle_type = request.form.get('vehicle_type', '').strip()
+        
+        # Handle company logo upload
+        if 'company_logo' in request.files:
+            file = request.files['company_logo']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"company_logo_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.company_logo = filename
+        
+        # Handle profile picture upload (optional)
+        if 'profile_picture' in request.files:
+            file = request.files['profile_picture']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"profile_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.profile_picture = filename
+        
+        db.session.commit()
+        log_action('COURIER_PROFILE_UPDATED', 'User', user.id, 'Updated courier profile')
+        flash('Profile updated successfully!', 'success')
+        return redirect(url_for('courier_profile'))
+    
+    return render_template('courier_profile.html', user=user)
+
+
 # ==================== RIDER ROUTES ====================
 
 @app.route('/rider/dashboard')
@@ -2844,6 +2892,52 @@ def rider_dashboard():
         available_to_withdraw=available_to_withdraw,
         Decimal=Decimal
     )
+
+
+@app.route('/rider/profile', methods=['GET', 'POST'])
+@login_required
+@role_required('rider')
+def rider_profile():
+    """Rider profile edit page"""
+    user = User.query.get(session['user_id'])
+    
+    if request.method == 'POST':
+        # Update rider personal information
+        user.full_name = request.form.get('full_name', '').strip()
+        user.first_name = request.form.get('first_name', '').strip()
+        user.middle_name = request.form.get('middle_name', '').strip()
+        user.last_name = request.form.get('last_name', '').strip()
+        user.phone = request.form.get('phone', '').strip()
+        user.email = request.form.get('email', '').strip()
+        user.vehicle_type = request.form.get('vehicle_type', '').strip()
+        user.plate_number = request.form.get('plate_number', '').strip()
+        
+        # Handle profile picture upload
+        if 'profile_picture' in request.files:
+            file = request.files['profile_picture']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"rider_profile_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.profile_picture = filename
+        
+        # Handle driver's license upload (optional)
+        if 'drivers_license' in request.files:
+            file = request.files['drivers_license']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filename = f"drivers_license_{user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                user.drivers_license = filename
+        
+        db.session.commit()
+        log_action('RIDER_PROFILE_UPDATED', 'User', user.id, 'Updated rider profile')
+        flash('Profile updated successfully!', 'success')
+        return redirect(url_for('rider_profile'))
+    
+    return render_template('rider_profile.html', user=user)
 
 
 @app.route('/rider/earnings-report/export-pdf')

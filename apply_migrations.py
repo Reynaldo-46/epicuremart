@@ -144,6 +144,34 @@ def add_index():
         db.session.rollback()
         return False
 
+def add_courier_profile_fields():
+    """Add courier profile fields (company_logo, company_address, company_description)"""
+    fields = [
+        ('company_logo', 'VARCHAR(255)', 'AFTER company_name'),
+        ('company_address', 'TEXT', 'AFTER company_logo'),
+        ('company_description', 'TEXT', 'AFTER company_address'),
+    ]
+    
+    for field_name, field_type, position in fields:
+        if check_column_exists(field_name):
+            print(f"✓ {field_name} column already exists")
+            continue
+        
+        try:
+            print(f"Adding {field_name} column...")
+            db.session.execute(text(f"""
+                ALTER TABLE users 
+                ADD COLUMN {field_name} {field_type} NULL {position}
+            """))
+            db.session.commit()
+            print(f"✓ {field_name} column added successfully")
+        except Exception as e:
+            print(f"✗ Error adding {field_name}: {e}")
+            db.session.rollback()
+            return False
+    
+    return True
+
 def main():
     """Run all migrations"""
     print("=" * 60)
@@ -165,6 +193,7 @@ def main():
             ("Handle courier_id column", handle_courier_id),
             ("Add foreign key constraint", add_foreign_key),
             ("Add index", add_index),
+            ("Add courier profile fields", add_courier_profile_fields),
         ]
         
         failed = False
